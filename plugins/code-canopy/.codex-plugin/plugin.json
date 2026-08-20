@@ -1,0 +1,30 @@
+{
+  "name": "code-canopy",
+  "version": "0.1.0",
+  "description": "Plan and execute engineering goals with small, safe agent trees.",
+  "author": {
+    "name": "adhit-r",
+    "url": "https://github.com/adhit-r"
+  },
+  "homepage": "https://github.com/adhit-r/codecanopy",
+  "repository": "https://github.com/adhit-r/codecanopy",
+  "license": "MIT",
+  "keywords": ["engineering", "multi-agent", "orchestration", "planning", "git"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CodeCanopy",
+    "shortDescription": "Coordinate bounded engineering agent trees.",
+    "longDescription": "CodeCanopy turns an engineering requirement into a reviewed tree of specialist and worker agents, isolates Git writes, and keeps integration and final verification with one lead.",
+    "developerName": "adhit-r",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/adhit-r/codecanopy",
+    "privacyPolicyURL": "https://github.com/adhit-r/codecanopy/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/adhit-r/codecanopy/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "Use $code-canopy to plan this engineering goal as a bounded agent tree.",
+      "Use $code-canopy to implement this feature with isolated worktrees and verification.",
+      "Use $code-canopy to choose the smallest safe engineering team for this task."
+    ]
+  }
+}

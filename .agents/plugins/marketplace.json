@@ -1,0 +1,20 @@
+{
+  "name": "codecanopy",
+  "interface": {
+    "displayName": "CodeCanopy"
+  },
+  "plugins": [
+    {
+      "name": "code-canopy",
+      "source": {
+        "source": "local",
+        "path": "./plugins/code-canopy"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
