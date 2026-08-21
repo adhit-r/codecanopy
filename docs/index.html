@@ -58,6 +58,7 @@
       <nav aria-label="Primary navigation">
         <a href="#definition">Contract</a>
         <a href="#configuration">Config</a>
+        <a href="#benchmark">Benchmark</a>
         <a href="#safety">Safety</a>
         <a href="https://github.com/adhit-r/codecanopy">GitHub</a>
         <a class="nav-install" href="#install">Install</a>
@@ -217,6 +218,27 @@ reasoning_effort = "high"</code></pre>
         </article>
       </section>
 
+      <section class="benchmark" id="benchmark" aria-labelledby="benchmark-title">
+        <div class="benchmark-intro">
+          <p class="eyebrow">DETERMINISTIC POLICY CHECK</p>
+          <h2 id="benchmark-title">Weights choose the smallest capable model.</h2>
+          <p>Each planning node receives normalized complexity and size scores. CodeCanopy combines them with the configured weights, then applies safety overrides for lead, review, and uncertainty.</p>
+          <p class="benchmark-result"><strong>10/10 routes passed</strong><br><strong>3/3 invalid estimates rejected</strong></p>
+          <p class="benchmark-note">This is a checked-in routing-policy benchmark, not a claim about provider quality, latency, or production throughput.</p>
+        </div>
+        <div class="benchmark-table" role="table" aria-label="Automatic model routing benchmark results">
+          <div class="benchmark-row benchmark-head" role="row">
+            <span role="columnheader">Work shape</span><span role="columnheader">Score</span><span role="columnheader">Tier</span><span role="columnheader">Configured model</span>
+          </div>
+          <div class="benchmark-row" role="row"><span role="rowheader">README typo</span><span role="cell">0.07</span><span role="cell">worker</span><span role="cell"><code>gpt-5.6-luna</code></span></div>
+          <div class="benchmark-row" role="row"><span role="rowheader">API + persistence</span><span role="cell">0.47</span><span role="cell">expert</span><span role="cell"><code>gpt-5.6-terra</code></span></div>
+          <div class="benchmark-row" role="row"><span role="rowheader">Cross-component feature</span><span role="cell">0.78</span><span role="cell">lead</span><span role="cell"><code>gpt-5.6-sol</code></span></div>
+          <div class="benchmark-row" role="row"><span role="rowheader">Security boundary</span><span role="cell">0.36</span><span role="cell">lead override</span><span role="cell"><code>gpt-5.6-sol</code></span></div>
+          <div class="benchmark-row" role="row"><span role="rowheader">Accepted-change review</span><span role="cell">0.24</span><span role="cell">reviewer</span><span role="cell"><code>gpt-5.6-terra</code></span></div>
+          <div class="benchmark-row" role="row"><span role="rowheader">Missing estimate</span><span role="cell">n/a</span><span role="cell">expert floor</span><span role="cell"><code>gpt-5.6-terra</code></span></div>
+        </div>
+      </section>
+
       <section class="knowledge" id="definition" aria-labelledby="definition-title">
         <div class="knowledge-intro">
           <h2 id="definition-title">A direct definition, not a swarm promise.</h2>
@@ -279,6 +301,7 @@ reasoning_effort = "high"</code></pre>
       <nav aria-label="Footer navigation">
         <a href="#definition">Contract</a>
         <a href="#configuration">Config</a>
+        <a href="#benchmark">Benchmark</a>
         <a href="#safety">Safety</a>
         <a href="https://github.com/adhit-r/codecanopy">GitHub</a>
       </nav>

@@ -5,6 +5,7 @@ CodeCanopy is a free, open-source Codex plugin for turning an engineering goal i
 - Runtime: Codex only in v0.2.
 - Contract: one root lead owns integration and the final verdict; dependency-ready leaves execute; results are verified and integrated bottom-up.
 - Routing: each node receives normalized complexity and size scores; weighted thresholds select worker, expert, lead, or reviewer automatically, with safety overrides for root, integration, security, and uncertainty.
+- Benchmark: the checked-in deterministic policy fixture passes 10/10 routing cases and rejects 3/3 invalid score cases; this is policy evidence, not model quality or latency evidence. Source: https://github.com/adhit-r/codecanopy/blob/main/benchmarks/model_routing.py
 - Boundary: CodeCanopy's root creates and verifies isolated worktrees where needed. The host enforces documented sandbox, approval, model-availability, and concurrency boundaries.
 - Configuration can tune planning limits but cannot grant authority.
 
