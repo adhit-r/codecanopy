@@ -1,6 +1,6 @@
 # CodeCanopy Codex adapter
 
-This adapter maps the provider-neutral runtime contract to current Codex preferences. The runtime contract still defines CodeCanopy behavior; Codex and its host environment retain enforcement of their own capabilities and policy.
+This adapter maps the provider-neutral runtime contract to current Codex preferences. The local runtime invokes Codex headlessly with `codex exec --skip-git-repo-check --json` after its capability check and within the recorded timeout. The runtime contract still defines CodeCanopy behavior; Codex and its host environment retain enforcement of their own capabilities and policy.
 
 ## Role preferences
 
@@ -26,3 +26,5 @@ CodeCanopy plans within its configured limits, but Codex and its host environmen
 No documented Codex setting enforces CodeCanopy's maximum depth or total-node limit. The planner must record and honor those limits itself; this adapter does not claim host enforcement where none is documented.
 
 Configuration may tune planning limits and preferred model mappings. It cannot grant Git, network, destructive, credential, production, or publication authority. A child receives no authority beyond its parent, and Codex approval or sandbox enforcement remains independent of the planning contract.
+
+Codex is the explicit recorded fallback only for a Claude node whose CLI executable is unavailable. The receipt identifies both requested and actual provider; no credential is transferred between CLIs.

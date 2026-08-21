@@ -1,6 +1,6 @@
 # CodeCanopy
 
-CodeCanopy is a Codex engineering orchestration plugin. It turns a requirement into the smallest verified recursive agent tree, runs only dependency-ready leaves, and integrates evidence bottom-up under one accountable lead.
+CodeCanopy is an engineering orchestration plugin with local runtime support for provider-neutral node records. It turns a requirement into the smallest verified recursive agent tree, runs only dependency-ready leaves, and integrates evidence bottom-up under one accountable lead.
 
 [Website](https://adhit-r.github.io/codecanopy/) · [Current work](https://github.com/adhit-r/codecanopy/issues/1) · [Good first issue](https://github.com/adhit-r/codecanopy/issues/3)
 
@@ -62,18 +62,20 @@ retry_limit = 1
 
 The strongest configured tier owns requirements, material questions, integration, and replanning. Smaller configured tiers receive bounded work. Model availability and host limits still apply.
 
+Provider and timeout are per-node `ProviderRequest` values, not TOML settings. Local support checks an installed CLI, then invokes either `codex exec --skip-git-repo-check --json` or `claude --print --output-format json` without a shell. The only fallback is an unavailable Claude executable to Codex, and the result/receipt flags it. Local support does not copy credentials, choose a provider silently, or claim that provider policies or model quality are equivalent.
+
 ## Safety boundary
 
-The skill never expands the user's authority. Remote writes, destructive actions, credentials, production changes, and scope expansion require explicit approval. CodeCanopy and the root create and verify worktree isolation where needed; the host retains its documented sandbox, approval, model, and concurrency boundaries.
+The skill never expands the user's authority. Remote writes, destructive actions, credentials, production changes, and scope expansion require explicit approval. CodeCanopy and the root create and verify worktree isolation where needed; the local helper creates detached worktrees under a caller-owned root and never merges, commits, or pushes. The host retains its documented sandbox, approval, model, and concurrency boundaries.
+
+Local manifests and proof receipts are append-only JSONL evidence for interrupted-run recovery. Recovery never marks work successful; the parent rechecks the immutable baseline, dependencies, worktree, and evidence before dispatch, otherwise invalidating only downstream nodes. This is local runtime support, not a durable scheduler, distributed lock, secret store, production audit trail, or proof of provider quality.
 
 ## Roadmap
 
-- Current: [Recursive Canopy v0.2](https://github.com/adhit-r/codecanopy/issues/1) and [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2).
-- Next: [Claude Code provider adapter](https://github.com/adhit-r/codecanopy/issues/4).
-- Research: [mixed Codex CLI and Claude Code CLI trees](https://github.com/adhit-r/codecanopy/issues/5).
-- Evidence-gated: [resumable run manifests and proof history](https://github.com/adhit-r/codecanopy/issues/6).
+- Current: [Recursive Canopy v0.2](https://github.com/adhit-r/codecanopy/issues/1), [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), and local runtime support tracked by [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
+- Evidence-gated: real-provider quality, production behavior, and durable multi-process recovery remain unclaimed until separately observed.
 
-A deterministic scheduler remains deferred until real runs show that the declarative contract cannot honor limits or resume reliably.
+A deterministic scheduler remains deferred until real runs show that the local contract cannot honor limits or recovery requirements.
 
 ## Contributing
 
