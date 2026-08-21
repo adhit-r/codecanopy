@@ -1,0 +1,13 @@
+# CodeCanopy
+
+CodeCanopy is a free, open-source Codex plugin for turning an engineering goal into the smallest useful ownership tree and ordering work through artifact dependencies.
+
+- Runtime: Codex only in v0.2.
+- Contract: one root lead owns integration and the final verdict; dependency-ready leaves execute; results are verified and integrated bottom-up.
+- Boundary: CodeCanopy's root creates and verifies isolated worktrees where needed. The host enforces documented sandbox, approval, model-availability, and concurrency boundaries.
+- Configuration can tune planning limits but cannot grant authority.
+
+Primary page: https://adhit-r.github.io/codecanopy/
+Repository and installation: https://github.com/adhit-r/codecanopy#install
+Current v0.2 work: https://github.com/adhit-r/codecanopy/issues/1
+Future research, not shipped support: Claude adapter https://github.com/adhit-r/codecanopy/issues/4; mixed-provider CLI https://github.com/adhit-r/codecanopy/issues/5.

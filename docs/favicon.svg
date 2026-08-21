@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CodeCanopy">
+  <rect width="64" height="64" fill="#071824"/>
+  <path d="M12 48V18h18M30 18h22M30 18v15M30 33h17M30 33v15M30 48h18" fill="none" stroke="#bed6ea" stroke-linecap="square" stroke-width="5"/>
+  <circle cx="12" cy="48" r="4" fill="#ef5b18"/>
+  <circle cx="30" cy="18" r="4" fill="#cce6c9"/>
+  <circle cx="48" cy="18" r="4" fill="#cce6c9"/>
+  <circle cx="47" cy="33" r="4" fill="#cce6c9"/>
+  <circle cx="48" cy="48" r="4" fill="#cce6c9"/>
+</svg>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://adhit-r.github.io/codecanopy/sitemap.xml

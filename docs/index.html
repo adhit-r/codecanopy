@@ -3,179 +3,274 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="CodeCanopy is a Codex plugin for building the smallest verified engineering agent tree.">
-    <title>CodeCanopy — the smallest verified path</title>
+    <meta name="description" content="CodeCanopy is a free, open-source Codex plugin for planning the smallest verified, dependency-ready engineering agent tree.">
+    <meta name="robots" content="index,follow">
+    <title>CodeCanopy | The smallest verified Codex agent tree</title>
+    <link rel="canonical" href="https://adhit-r.github.io/codecanopy/">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="CodeCanopy">
+    <meta property="og:title" content="CodeCanopy | The smallest verified Codex agent tree">
+    <meta property="og:description" content="Plan the smallest dependency-ready engineering tree, keep one lead responsible for integration, and verify upward with evidence.">
+    <meta property="og:url" content="https://adhit-r.github.io/codecanopy/">
+    <meta property="og:image" content="https://adhit-r.github.io/codecanopy/codecanopy-social.png">
+    <meta property="og:image:alt" content="CodeCanopy dependency route with a nested engineering task rack">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="CodeCanopy | The smallest verified Codex agent tree">
+    <meta name="twitter:description" content="A free Codex plugin for bounded engineering-agent coordination.">
+    <meta name="twitter:image" content="https://adhit-r.github.io/codecanopy/codecanopy-social.png">
+    <meta name="twitter:image:alt" content="CodeCanopy dependency route with a nested engineering task rack">
     <link rel="stylesheet" href="styles.css">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "CodeCanopy",
+        "description": "A free, open-source Codex plugin for planning bounded engineering agent trees and verifying integration bottom-up.",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Engineering orchestration plugin",
+        "operatingSystem": "Codex",
+        "softwareVersion": "0.2.0",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "license": "https://github.com/adhit-r/codecanopy/blob/main/LICENSE",
+        "url": "https://adhit-r.github.io/codecanopy/",
+        "codeRepository": "https://github.com/adhit-r/codecanopy"
+      }
+    </script>
   </head>
   <body>
     <!--
-    THESIS: CodeCanopy exposes the shortest verified route from requirement to accepted goal and refuses the generic SaaS hero plus feature-card stack.
-    OWN-WORLD: Cool-gray control surface, navy mechanical rules, blue and green flight strips, and safety orange only for actions.
-    STORY: Understand the recursive route, inspect its bounded rules, then install or open the repository.
-    FIRST VIEWPORT: Compact navigation above a diagonal requirement-to-goal route with nested agent strips and the install action on the same control surface.
+    THESIS: CodeCanopy makes the smallest dependency-ready route to a verified engineering goal visible, refusing a generic hero and feature-card stack.
+    OWN-WORLD: A cool-gray operations board with navy mechanical rules, blue work strips, pale green route fields, and orange reserved for actions.
+    STORY: Understand the definition, inspect the bounded route, then install or work from the public backlog.
+    FIRST VIEWPORT: A compact light header sits above a factual left column and one coherent nested strip rack on the right.
     FORM: Air-traffic progress-strip board, grounded direction 4, seed e635eb3d.
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
     -->
     <header class="site-header">
       <a class="wordmark" href="#top" aria-label="CodeCanopy home">CODECANOPY</a>
+      <p class="descriptor">A Codex engineering orchestration plugin</p>
       <nav aria-label="Primary navigation">
-        <a href="#contract">Contract</a>
+        <a href="#definition">Contract</a>
+        <a href="#configuration">Config</a>
         <a href="#safety">Safety</a>
         <a href="https://github.com/adhit-r/codecanopy">GitHub</a>
-        <a class="nav-action" href="#install">Install</a>
+        <a class="nav-install" href="#install">Install</a>
       </nav>
     </header>
 
     <main id="top">
-      <section class="route-board" aria-labelledby="route-title">
-        <div class="route-intro strip endpoint requirement">
-          <span class="endpoint-label">User requirement</span>
-          <strong>Define one engineering goal and the proof that closes it.</strong>
-        </div>
-
-        <div class="route-heading">
-          <p>Recursive Canopy v0.2 · Codex plugin</p>
-          <h1 id="route-title">Build the smallest verified path to done.</h1>
-          <p class="lede">One lead owns the goal. Work moves only when its artifact dependencies are ready, then returns upward with evidence.</p>
-        </div>
-
-        <svg class="route-geometry" viewBox="0 0 1200 540" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-          <path d="M78 55 L217 114 L380 425 L1093 480" />
-          <path d="M217 114 L972 160 L1093 480" />
-          <path d="M380 425 L972 160" />
-          <circle cx="217" cy="114" r="5" /><circle cx="380" cy="425" r="5" /><circle cx="1093" cy="480" r="5" />
-        </svg>
-
-        <ol class="ownership-tree" aria-label="Example ownership and artifact route">
-          <li class="node root-node">
-            <article class="strip status-ready">
-              <span class="role">Root lead</span>
-              <span class="outcome">Scope, integration, final verdict</span>
-              <span class="dependency">Requirement defined</span>
-              <span class="state">Ready</span>
-            </article>
-            <ol>
-              <li class="node architecture">
-                <article class="strip status-planned">
-                  <span class="role">Architecture parent</span>
-                  <span class="outcome">Break work into verifiable artifacts</span>
-                  <span class="dependency">Root scope</span>
-                  <span class="state">Planned</span>
-                </article>
-                <ol>
-                  <li>
-                    <article class="strip leaf status-accepted">
-                      <span class="role">Contract leaf</span>
-                      <span class="outcome">Interface and acceptance contract</span>
-                      <span class="dependency">Architecture route</span>
-                      <span class="state">Accepted</span>
-                    </article>
-                  </li>
-                  <li>
-                    <article class="strip leaf status-accepted">
-                      <span class="role">Evidence leaf</span>
-                      <span class="outcome">Testable proof boundary</span>
-                      <span class="dependency">Contract available</span>
-                      <span class="state">Accepted</span>
-                    </article>
-                  </li>
-                </ol>
-              </li>
-              <li class="node implementation">
-                <article class="strip status-planned">
-                  <span class="role">Implementation parent</span>
-                  <span class="outcome">Integrate dependency-ready changes</span>
-                  <span class="dependency">Contract accepted</span>
-                  <span class="state">Planned</span>
-                </article>
-                <ol>
-                  <li>
-                    <article class="strip leaf status-ready">
-                      <span class="role">Backend leaf</span>
-                      <span class="outcome">Scoped source and runnable check</span>
-                      <span class="dependency">Interface contract</span>
-                      <span class="state">Ready</span>
-                    </article>
-                  </li>
-                  <li>
-                    <article class="strip leaf status-ready">
-                      <span class="role">Interface leaf</span>
-                      <span class="outcome">Scoped client change and check</span>
-                      <span class="dependency">Backend artifact</span>
-                      <span class="state">Ready</span>
-                    </article>
-                  </li>
-                </ol>
-              </li>
-              <li>
-                <article class="strip reviewer status-accepted">
-                  <span class="role">Reviewer leaf</span>
-                  <span class="outcome">Inspect diff and evidence</span>
-                  <span class="dependency">Parent integration</span>
-                  <span class="state">Accepted</span>
-                </article>
-              </li>
-            </ol>
-          </li>
-        </ol>
-
-        <div class="goal strip endpoint">
-          <span class="endpoint-label">Verified goal</span>
-          <strong>Accepted completion with evidence under one accountable lead.</strong>
-        </div>
-
-        <div class="install-panel" id="install">
-          <div>
-            <p class="panel-label">Install from the marketplace</p>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <h1 id="hero-title">The smallest verified tree that reaches the goal.</h1>
+          <div class="definition-callout">
+            <p><strong>CodeCanopy is a Codex plugin that turns an engineering goal into the smallest dependency-ready tree of agents.</strong> One lead keeps scope, integration, and the final verdict; work comes back upward with evidence.</p>
+          </div>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/adhit-r/codecanopy#install">Install CodeCanopy</a>
+            <a class="button button-secondary" href="https://github.com/adhit-r/codecanopy">View on GitHub</a>
+          </div>
+          <div class="install-command" id="install">
+            <p>Install</p>
             <code>codex plugin marketplace add adhit-r/codecanopy --ref main</code>
             <code>codex plugin add code-canopy@codecanopy</code>
           </div>
-          <a class="install-action" href="https://github.com/adhit-r/codecanopy#install">Read installation steps <span aria-hidden="true">→</span></a>
         </div>
+
+        <figure class="route-rack" aria-labelledby="route-title">
+          <figcaption id="route-title">A bounded ownership route</figcaption>
+          <p class="rack-note">Illustrative route shape, not live task status. Parents integrate; dependency-ready leaves produce the evidence they need.</p>
+          <div class="rack-columns" aria-hidden="true">
+            <span>Node</span><span>Responsibility</span><span>Dependency</span>
+          </div>
+          <ol class="rack-list" aria-label="Illustrative dependency-ready agent tree">
+            <li class="rack-root">
+              <article class="route-strip root-strip">
+                <span class="node-kind">Lead</span>
+                <strong>Root</strong>
+                <span>Own scope, integration, and final verdict</span>
+                <span>User goal</span>
+              </article>
+              <ol>
+                <li class="rack-parent">
+                  <article class="route-strip parent-strip">
+                    <span class="node-kind">Parent</span>
+                    <strong>Architecture</strong>
+                    <span>Define contracts and artifact dependencies</span>
+                    <span>Root scope</span>
+                  </article>
+                  <ol>
+                    <li>
+                      <article class="route-strip leaf-strip">
+                        <span class="node-kind">Leaf</span>
+                        <strong>Contract</strong>
+                        <span>State the interface and acceptance boundary</span>
+                        <span>Architecture</span>
+                      </article>
+                    </li>
+                    <li>
+                      <article class="route-strip leaf-strip">
+                        <span class="node-kind">Leaf</span>
+                        <strong>Evidence</strong>
+                        <span>Define a runnable proof for the agreed boundary</span>
+                        <span>Contract</span>
+                      </article>
+                    </li>
+                  </ol>
+                </li>
+                <li class="rack-parent">
+                  <article class="route-strip parent-strip">
+                    <span class="node-kind">Parent</span>
+                    <strong>Implementation</strong>
+                    <span>Integrate scoped, owned changes</span>
+                    <span>Contract artifact</span>
+                  </article>
+                  <ol>
+                    <li>
+                      <article class="route-strip leaf-strip">
+                        <span class="node-kind">Leaf</span>
+                        <strong>Backend</strong>
+                        <span>Deliver one source change and runnable check</span>
+                        <span>Contract artifact</span>
+                      </article>
+                    </li>
+                    <li>
+                      <article class="route-strip leaf-strip">
+                        <span class="node-kind">Leaf</span>
+                        <strong>Interface</strong>
+                        <span>Deliver the dependent client change and check</span>
+                        <span>Backend artifact</span>
+                      </article>
+                    </li>
+                  </ol>
+                </li>
+                <li>
+                  <article class="route-strip review-strip">
+                    <span class="node-kind">Leaf</span>
+                    <strong>Review</strong>
+                    <span>Inspect the integrated diff and its evidence</span>
+                    <span>Integrated parent</span>
+                  </article>
+                </li>
+              </ol>
+            </li>
+          </ol>
+          <div class="goal-strip">
+            <span>Goal</span>
+            <strong>Root acceptance with integrated evidence</strong>
+          </div>
+        </figure>
       </section>
 
-      <section class="operations" id="contract" aria-labelledby="operations-title">
-        <div class="section-heading">
-          <h2 id="operations-title">How the route stays bounded</h2>
-          <p>CodeCanopy uses an ownership tree for authority and an artifact dependency DAG for execution order.</p>
-        </div>
-        <ol class="operations-list">
-          <li>
-            <h3>Leaf test</h3>
-            <p>Define the smallest independently verifiable outcome, then work backward only to the dependencies needed to prove it.</p>
-          </li>
-          <li>
-            <h3>Critical frontier</h3>
-            <p>Expand only the minimum ready work that can advance the next proof; sibling work is not a reason to widen scope.</p>
-          </li>
-          <li>
-            <h3>Parent acceptance</h3>
-            <p>Accept a parent only after its required artifacts and evidence are present. The root retains integration and the final verdict.</p>
-          </li>
-        </ol>
-      </section>
+      <section class="operating-band" id="contract" aria-label="Operating contract">
+        <article class="execution-sequence">
+          <h2>Execution sequence</h2>
+          <ol>
+            <li><strong>Leaf test</strong><span>Keep one agent when one bounded deliverable and acceptance check are enough.</span></li>
+            <li><strong>Critical frontier</strong><span>Dispatch only the smallest ready work that can advance the next proof.</span></li>
+            <li><strong>Parent acceptance</strong><span>Verify required artifacts and evidence before a result moves upward; only the root performs Git integration.</span></li>
+          </ol>
+        </article>
 
-      <section class="configuration" aria-labelledby="configuration-title">
-        <div class="section-heading">
-          <h2 id="configuration-title">Configuration is a planning ceiling</h2>
-          <p>An optional project-root <code>.codecanopy.toml</code> can lower or tune these v0.2 defaults. It cannot grant authority.</p>
-        </div>
-        <pre aria-label="Default CodeCanopy TOML configuration"><code>[codecanopy]
+        <article class="config-panel" id="configuration">
+          <h2>Configuration</h2>
+          <p>An optional project-root <code>.codecanopy.toml</code> may lower or tune these planning limits. It cannot grant authority.</p>
+          <pre aria-label="Canonical CodeCanopy configuration"><code>schema_version = 1
+runtime = "codex"
+
+[tree]
 max_depth = 3
 max_children_per_node = 3
 max_total_nodes = 9
 max_parallel = 3
+max_replans = 1
+
+[budget]
 root_reserve_percent = 35
-retry_limit = 1</code></pre>
+retry_limit = 1
+
+[models.lead]
+reasoning_effort = "high"</code></pre>
+        </article>
+
+        <article class="safety-panel" id="safety">
+          <h2>Safety boundary</h2>
+          <p>CodeCanopy's root creates and verifies isolated worktrees where needed. Codex and its host enforce only their documented sandbox, approval, model-availability, and concurrency boundaries.</p>
+          <p>Delegation never expands a user's authority. Remote writes, destructive actions, credentials, production changes, and scope expansion still require explicit approval.</p>
+        </article>
+      </section>
+
+      <section class="knowledge" id="definition" aria-labelledby="definition-title">
+        <div class="knowledge-intro">
+          <h2 id="definition-title">A direct definition, not a swarm promise.</h2>
+          <p>CodeCanopy is free and open source under the MIT License. It helps a lead turn a non-trivial engineering requirement into the smallest useful ownership tree, order work through artifact dependencies, and integrate verified results bottom-up.</p>
+        </div>
+
+        <div class="comparison" aria-labelledby="comparison-title">
+          <h2 id="comparison-title">Bounded route versus an unbounded swarm</h2>
+          <div class="comparison-table" role="table" aria-label="Comparison of CodeCanopy and an unbounded swarm">
+            <div class="comparison-row comparison-head" role="row">
+              <span role="columnheader">Question</span><span role="columnheader">CodeCanopy</span><span role="columnheader">Unbounded swarm pattern</span>
+            </div>
+            <div class="comparison-row" role="row">
+              <span role="rowheader">Who owns integration?</span><span role="cell">One root lead</span><span role="cell">Must be assigned separately</span>
+            </div>
+            <div class="comparison-row" role="row">
+              <span role="rowheader">What may execute?</span><span role="cell">Dependency-ready leaves</span><span role="cell">Any work that is dispatched</span>
+            </div>
+            <div class="comparison-row" role="row">
+              <span role="rowheader">How does work finish?</span><span role="cell">Evidence is integrated bottom-up</span><span role="cell">The coordination rule is left to the team</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="faq" aria-labelledby="faq-title">
+          <h2 id="faq-title">Frequently asked questions</h2>
+          <details>
+            <summary>Does v0.2 support providers other than Codex?</summary>
+            <p>No. v0.2 supports Codex only. A Claude adapter is tracked as future research, not a current capability.</p>
+          </details>
+          <details>
+            <summary>Who creates and verifies isolated worktrees?</summary>
+            <p>CodeCanopy's root does so where needed. The host enforces only its documented sandbox, approval, model-availability, and concurrency boundaries.</p>
+          </details>
+          <details>
+            <summary>Can project configuration grant a new permission?</summary>
+            <p>No. Configuration can tune planning limits and preferred model mappings, but it cannot grant Git, network, destructive, credential, production, or publication authority.</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="contribute" aria-labelledby="contribute-title">
+        <div>
+          <h2 id="contribute-title">Build the public route with us.</h2>
+          <p>Use the public issue tracker for current work, deployment follow-up, and carefully labeled future research.</p>
+        </div>
+        <ul class="issue-list">
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/1">v0.2 current work — issue #1</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/2">GitHub Pages follow-up — issue #2</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/3">Good first issue — issue #3</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/4">Future Claude adapter research — issue #4</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/5">Future mixed-provider CLI research — issue #5</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/6">Future resumable manifest — issue #6</a></li>
+        </ul>
       </section>
     </main>
 
-    <footer class="site-footer" id="safety">
-      <div>
-        <h2>Safety clearance</h2>
-        <p>CodeCanopy guides agent behavior; Codex and its sandbox enforce model availability, concurrency, worktree isolation, permissions, and approvals. Delegation never expands your authority.</p>
-      </div>
-      <a class="repository-link" href="https://github.com/adhit-r/codecanopy">View source on GitHub <span aria-hidden="true">↗</span></a>
+    <footer class="site-footer">
+      <span>CodeCanopy</span>
+      <nav aria-label="Footer navigation">
+        <a href="#definition">Contract</a>
+        <a href="#configuration">Config</a>
+        <a href="#safety">Safety</a>
+        <a href="https://github.com/adhit-r/codecanopy">GitHub</a>
+      </nav>
+      <a href="https://github.com/adhit-r/codecanopy/blob/main/LICENSE">MIT License</a>
     </footer>
   </body>
 </html>
