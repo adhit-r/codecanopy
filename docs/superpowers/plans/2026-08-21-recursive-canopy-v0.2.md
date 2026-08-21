@@ -96,6 +96,7 @@ Expected: no fixed non-recursive rule; safety statements remain present.
 - Modify: `plugins/code-canopy/.codex-plugin/plugin.json`
 - Modify: `plugins/code-canopy/skills/code-canopy/agents/openai.yaml`
 - Modify: `README.md`
+- Create: `CONTRIBUTING.md`
 
 **Interfaces:**
 - Consumes: accepted Tasks 1 and 2.
@@ -111,7 +112,7 @@ Make the default prompt request the smallest verified recursive agent tree. Keep
 
 - [ ] **Step 3: Update README**
 
-Describe recursive planning, `.codecanopy.toml`, honest host boundaries, the Pages URL, and unchanged installation commands.
+Describe recursive planning, `.codecanopy.toml`, honest host boundaries, the Pages URL, unchanged installation commands, current roadmap issues, and one direct contributor path. Keep the contributor guide bounded to issue ownership, safety, and existing validators.
 
 - [ ] **Step 4: Run validators**
 
