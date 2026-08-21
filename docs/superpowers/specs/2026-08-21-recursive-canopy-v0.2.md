@@ -12,7 +12,7 @@ The smallest verified tree that reaches the goal.
 
 v0.2 supports Codex only. The core contract uses provider-neutral role and result terms so a later Claude adapter can reuse semantics without pretending manifests, model IDs, permissions, or limits are portable.
 
-The skill defines required behavior. Codex and its sandbox remain responsible for model availability, concurrency, worktree isolation, permissions, and approvals.
+The skill defines required behavior. Codex and its sandbox remain responsible for documented model availability, concurrency, permissions, and approvals. CodeCanopy and the root explicitly create and verify worktree isolation where it is needed.
 
 ## Planning structures
 

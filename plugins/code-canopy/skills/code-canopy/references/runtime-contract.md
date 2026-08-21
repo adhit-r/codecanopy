@@ -1,6 +1,6 @@
 # CodeCanopy runtime contract
 
-This contract defines CodeCanopy's required planning behavior. Codex and its host environment enforce model availability, concurrency, worktree isolation, sandbox policy, permissions, and approvals. The contract cannot expand user authority.
+This contract defines CodeCanopy's required planning behavior. Codex and its host environment enforce documented model availability, concurrency, sandbox policy, permissions, and approvals. CodeCanopy and the root explicitly create and verify worktree isolation where it is needed. The contract cannot expand user authority.
 
 ## Node record
 

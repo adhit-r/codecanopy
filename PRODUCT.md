@@ -30,7 +30,7 @@ CodeCanopy is distributed as a Codex plugin containing an engineering orchestrat
 
 - Codex is the only supported runtime for v0.2.
 - The skill guides recursive decomposition, model routing, Git isolation, verification, and bottom-up integration.
-- A declarative plugin cannot itself enforce model availability, token budgets, concurrency, worktrees, sandbox policy, or remote authorization; the host remains the enforcement boundary.
+- A declarative plugin cannot itself guarantee worktree isolation; CodeCanopy and the root arrange and verify worktrees where needed. The host enforces documented sandbox, approval, model-availability, and concurrency boundaries. Configuration and plans cannot grant remote authorization.
 - Project teams may supply `.codecanopy.toml` to lower or tune planning limits and preferred model mappings.
 - Claude support is a future provider adapter, not a current capability.
 
