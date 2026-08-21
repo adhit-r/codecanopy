@@ -83,7 +83,7 @@ h3,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--ink);
   background: var(--orange);
   border: 1px solid var(--orange-dark);
   font-weight: 850;
@@ -111,6 +111,8 @@ h1 { max-width: 11.5ch; margin: 0; font-size: clamp(3rem, 5vw, 5.55rem); line-he
 .definition-callout { max-width: 40ch; margin: 25px 0 0; padding-top: 19px; border-top: 2px solid var(--ink); }
 .definition-callout p { margin: 0; }
 .definition-callout strong { font-weight: 760; }
+
+.mobile-route-proof { display: none; }
 
 .hero-actions { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 12px; }
 .button-secondary { min-height: 44px; padding: 0 17px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ink); font-weight: 800; text-decoration: none; text-transform: uppercase; }
@@ -230,8 +232,17 @@ details p { max-width: 68ch; margin: 0; padding: 0 0 17px; color: var(--muted); 
   .site-header nav a { flex: 0 0 auto; font-size: .69rem; }
   .nav-install { padding: 0 12px; }
   .hero { min-height: 0; padding-top: 36px; display: block; }
-  h1 { max-width: 10.8ch; font-size: clamp(3rem, 15vw, 4.7rem); }
+  h1 { max-width: 10.8ch; font-size: clamp(2.8rem, 13vw, 4.1rem); }
   .hero-copy { max-width: none; }
+  .mobile-route-proof,
+  .mobile-route-proof ol { margin: 0; padding: 0; list-style: none; }
+  .mobile-route-proof { margin-top: 22px; padding: 10px; display: block; background: var(--paper-strong); border: 1px solid var(--ink); }
+  .mobile-route-proof ol { margin: 6px 0 0 15px; padding-left: 11px; border-left: 1px solid var(--rule); }
+  .mobile-route-proof span,
+  .mobile-route-proof strong { padding: 6px 8px; display: block; background: var(--blue); border: 1px solid var(--ink); font-family: var(--display); font-size: .72rem; font-weight: 800; letter-spacing: .025em; text-transform: uppercase; }
+  .mobile-route-proof ol span { position: relative; }
+  .mobile-route-proof ol span::before { position: absolute; top: 50%; left: -12px; width: 11px; border-top: 1px solid var(--ink); content: ""; }
+  .mobile-goal strong { margin-top: 8px; color: var(--green-dark); background: var(--green); }
   .route-rack { margin-top: 42px; }
   .rack-columns { display: none; }
   .rack-list { padding: 10px; }
