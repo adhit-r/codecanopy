@@ -12,6 +12,13 @@ max_replans = 1
 root_reserve_percent = 35
 retry_limit = 1
 
+[routing]
+strategy = "weighted_complexity_size"
+complexity_weight = 0.6
+size_weight = 0.4
+worker_max_score = 0.33
+expert_max_score = 0.66
+
 [models.lead]
 model = "gpt-5.6-sol"
 reasoning_effort = "high"

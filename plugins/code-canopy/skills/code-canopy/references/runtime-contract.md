@@ -4,7 +4,7 @@ This contract defines CodeCanopy's required planning behavior. Codex and its hos
 
 ## Node record
 
-Record every node with its ID, parent, role, objective, deliverable, non-goals, baseline, read scope, write scope, produced artifacts, consumed artifacts, dependency IDs, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode. The baseline records one immutable commit plus any accepted dependency commits materialized into it. A child inherits only the parent authority and may narrow, never expand, its scope or budget.
+Record every node with its ID, parent, role, objective, deliverable, non-goals, baseline, read scope, write scope, produced artifacts, consumed artifacts, dependency IDs, acceptance check, evidence tier, normalized complexity score, normalized size score, weighted routing score, selected model tier, remaining budget, delegation permission, stop condition, and Git mode. The baseline records one immutable commit plus any accepted dependency commits materialized into it. A child inherits only the parent authority and may narrow, never expand, its scope or budget.
 
 Use an ownership tree for parent authority, scope, budget, questions, and integration. Use a separate artifact dependency DAG for scheduling. Only leaves with accepted dependencies may execute.
 
@@ -13,6 +13,19 @@ Use an ownership tree for parent authority, scope, budget, questions, and integr
 `draft -> planned -> ready -> active -> returned -> accepted` is the successful path. A node may move to `blocked` when required evidence, authorization, or a clean scope is unavailable. A changed contract or failed prerequisite moves affected descendants to `invalidated`; they return to `draft` only through an allowed subtree replan.
 
 A planned leaf is ready when all consumed artifacts and dependency nodes are accepted, its immutable baseline contains the exact accepted source dependencies it will test against, its assigned paths do not overlap an active writer, its acceptance check is explicit, and its execution fits the remaining budget. Depth and total-node capacity gate creating children; active-child capacity gates dispatch, not readiness. Dispatch the deepest ready critical-path leaves first within the active-child limit.
+
+## Automatic model routing
+
+During planning, the root estimates two normalized node signals from observable evidence: `complexity_score` for decisions, security, cross-component dependencies, integration, external capability, and failure modes; and `size_score` for owned paths, artifacts, checks, and expected coordination surface. The planner does not ask the user to select a model.
+
+With the configured weights, calculate:
+
+```text
+routing_score = (complexity_weight * complexity_score + size_weight * size_score)
+                 / (complexity_weight + size_weight)
+```
+
+Route `routing_score <= worker_max_score` to `worker`, values up to `expert_max_score` to `expert`, and larger values to `lead`. Root, integration, or security-sensitive decisions always use `lead`; explicit review work uses `reviewer`; missing or uncertain signals use at least `expert`. If the selected model is unavailable, return the node to the lead or use a documented safe tier; never silently downgrade.
 
 ## Integration barriers and collisions
 

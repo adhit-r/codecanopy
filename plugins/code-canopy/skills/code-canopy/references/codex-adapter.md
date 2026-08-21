@@ -13,6 +13,12 @@ This adapter maps the provider-neutral runtime contract to current Codex prefere
 
 Use the smallest capable tier for bounded execution. If a preferred model is unavailable, use only a safe available tier or return the work to the lead. Review and integration must not silently downgrade.
 
+## Automatic routing
+
+The planner assigns every node normalized complexity and size scores, then applies `[routing]` from `codecanopy.toml` without a human model choice. The weighted score selects `worker` for simple bounded work, `expert` for medium work, and `lead` for complex work. Root, integration, and security-sensitive decisions override the score to `lead`; review work selects `reviewer`; uncertain signals select at least `expert`.
+
+The routing score is a planning decision, not a host capability claim. Codex still decides whether a configured model is available. A missing model returns the node to the lead or uses a documented safe tier; it does not silently downgrade.
+
 ## Host boundary
 
 CodeCanopy plans within its configured limits, but Codex and its host environment enforce documented model availability, concurrency, sandbox policy, permissions, and approvals. CodeCanopy and the root must explicitly create and verify worktree isolation where it is needed. Effective concurrency is the lower of the CodeCanopy configuration and the host limit.

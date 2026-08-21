@@ -184,14 +184,14 @@
           <h2>Execution sequence</h2>
           <ol>
             <li><strong>Leaf test</strong><span>Keep one agent when one bounded deliverable and acceptance check are enough.</span></li>
-            <li><strong>Critical frontier</strong><span>Dispatch only the smallest ready work that can advance the next proof.</span></li>
+            <li><strong>Critical frontier</strong><span>Dispatch only the smallest ready work that can advance the next proof; weighted complexity and size select the configured model tier automatically.</span></li>
             <li><strong>Parent acceptance</strong><span>Verify required artifacts and evidence before a result moves upward; only the root performs Git integration.</span></li>
           </ol>
         </article>
 
         <article class="config-panel" id="configuration">
           <h2>Configuration</h2>
-          <p>An optional project-root <code>.codecanopy.toml</code> may lower or tune these planning limits. It cannot grant authority.</p>
+          <p>An optional project-root <code>.codecanopy.toml</code> may lower or tune these planning limits and weighted model routing. It cannot grant authority.</p>
           <pre aria-label="Canonical CodeCanopy configuration"><code>schema_version = 1
 runtime = "codex"
 

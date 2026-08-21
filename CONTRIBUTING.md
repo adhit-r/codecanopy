@@ -23,6 +23,7 @@ Run the checks that cover your change. For plugin contract or metadata changes, 
 ```bash
 python3 /Users/adhi/.codex/skills/.system/skill-creator/scripts/quick_validate.py plugins/code-canopy/skills/code-canopy
 python3 /Users/adhi/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/code-canopy
+python3 benchmarks/model_routing.py
 git diff --check
 ```
 
