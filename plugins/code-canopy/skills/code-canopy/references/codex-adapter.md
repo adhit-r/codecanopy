@@ -1,6 +1,6 @@
 # CodeCanopy Codex adapter
 
-This adapter maps the provider-neutral runtime contract to current Codex preferences. The local runtime invokes Codex headlessly with `codex exec --skip-git-repo-check --json` after its capability check and within the recorded timeout. The runtime contract still defines CodeCanopy behavior; Codex and its host environment retain enforcement of their own capabilities and policy.
+This adapter maps the provider-neutral runtime contract to current Codex preferences. The local runtime invokes Codex headlessly with `codex exec --json` after its capability check and within the recorded timeout. The runtime contract still defines CodeCanopy behavior; Codex and its host environment retain enforcement of their own capabilities and policy.
 
 ## Role preferences
 

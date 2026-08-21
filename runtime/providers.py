@@ -1,7 +1,7 @@
 """Small, headless execution adapters for installed Codex and Claude CLIs.
 
 Commands are intentionally configurable per request.  The defaults are
-``codex exec --skip-git-repo-check --json`` and ``claude --print
+``codex exec --json`` and ``claude --print
 --output-format json``; the prompt is appended as one argument, never
 interpolated into a shell command.
 """
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import sha256
 import json
+import os
 from pathlib import Path, PurePath
 import shutil
 import subprocess
@@ -20,7 +21,7 @@ from typing import Callable, Literal, Mapping, Sequence
 ProviderName = Literal["codex", "claude"]
 ResultStatus = Literal["completed", "failed", "timed_out", "unavailable"]
 DEFAULT_COMMANDS: Mapping[ProviderName, tuple[str, ...]] = {
-    "codex": ("codex", "exec", "--skip-git-repo-check", "--json"),
+    "codex": ("codex", "exec", "--json"),
     "claude": ("claude", "--print", "--output-format", "json"),
 }
 
@@ -118,6 +119,7 @@ def execute_provider(
             capture_output=True,
             check=False,
             cwd=str(request.cwd) if request.cwd else None,
+            env=_provider_environment(selected),
             text=True,
             timeout=request.timeout_seconds,
         )
@@ -156,12 +158,14 @@ def execute_provider(
 
 def append_proof_receipt(path: str | Path, request: ProviderRequest, result: ProviderResult) -> None:
     """Append a JSONL receipt with hashes only; never persist prompt or output."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     receipt = {
         key: result.receipt_data.get(key)
         for key in ("status", "provider", "requested_provider", "fallback_used", "fallback_reason", "exit_code", "timeout_seconds")
     }
     receipt.update(prompt_hash=_hash(request.prompt), output_hash=_hash(result.output))
-    with Path(path).open("a", encoding="utf-8") as handle:
+    with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(receipt, sort_keys=True) + "\n")
 
 
@@ -227,3 +231,14 @@ def _hash(value: str) -> str:
 def _validate_provider(provider: str) -> None:
     if provider not in DEFAULT_COMMANDS:
         raise ValueError(f"unsupported provider: {provider}")
+
+
+def _provider_environment(provider: ProviderName) -> dict[str, str]:
+    """Keep known credentials scoped to the CLI that can consume them."""
+    environment = os.environ.copy()
+    if provider == "claude":
+        environment.pop("OPENAI_API_KEY", None)
+        environment.pop("CODEX_API_KEY", None)
+    else:
+        environment.pop("ANTHROPIC_API_KEY", None)
+    return environment

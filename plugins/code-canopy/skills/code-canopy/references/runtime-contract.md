@@ -10,13 +10,13 @@ Use an ownership tree for parent authority, scope, budget, questions, and integr
 
 ## Provider request, result, and isolation
 
-Provider choice is per node: `codex` or `claude`. It is independent of the capability role and must be recorded before dispatch. A local request contains the prompt, preferred provider, timeout, working directory, and optional command override. The adapter first checks the selected CLI. Its supported headless commands are `codex exec --skip-git-repo-check --json` and `claude --print --output-format json`; it passes the prompt as one argument, never through a shell.
+Provider choice is per node: `codex` or `claude`. It is independent of the capability role and must be recorded before dispatch. A local request contains the prompt, preferred provider, timeout, working directory, and optional command override. The adapter first checks the selected CLI. Its supported headless commands are `codex exec --json` and `claude --print --output-format json`; it passes the prompt as one argument, never through a shell.
 
 The local result is `completed`, `failed`, `timed_out`, or `unavailable`, with the requested and actual provider, `fallback_used`, exit code, output, and error. A Claude request whose executable is unavailable may use Codex only if Codex is available; that is the sole fallback and the result must explicitly record it. A run failure or timeout never triggers fallback. No provider change is silent. Credentials are never copied, stored in the request/receipt, or passed from one provider to another; each CLI uses its own local authentication.
 
 Writing nodes use a fresh detached Git worktree below a caller-owned worktree root and the recorded immutable baseline. Reject absolute or escaping worktree names. The adapter does not merge or clean up a worktree, and a provider result does not bypass the normal integration barrier.
 
-Append a proof receipt as JSONL for every attempt. Receipts contain provider/result metadata plus SHA-256 hashes of the prompt and output, not their raw contents. They are execution evidence only; a successful CLI exit, receipt, or local check is not proof of provider quality, staging, production, or task acceptance.
+Append a proof receipt as JSONL for every attempt. Receipts contain provider/result metadata plus SHA-256 hashes of the prompt and output, not their raw contents. They are execution evidence only; a successful CLI exit, receipt, or local check is not proof of provider quality, staging, production, or task acceptance. The optional local runner marks a node `accepted` only when its caller supplies an explicit leaf acceptance check; otherwise it remains `returned`.
 
 ## Lifecycle and readiness
 

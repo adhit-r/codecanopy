@@ -1,6 +1,6 @@
 {
   "name": "code-canopy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Build and execute the smallest verified recursive Codex agent tree for an engineering goal.",
   "author": {
     "name": "adhit-r",

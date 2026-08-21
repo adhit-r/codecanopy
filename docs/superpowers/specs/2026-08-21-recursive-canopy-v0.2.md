@@ -53,7 +53,7 @@ Workers return: status, result, files, commit or diff, checks, evidence, and exa
 
 ## Local provider and recovery support
 
-Each node explicitly selects `codex` or `claude`. A `ProviderRequest` carries the prompt, preferred provider, timeout, working directory, and optional command override. The local adapter checks the chosen executable, invokes Codex with `codex exec --skip-git-repo-check --json` or Claude with `claude --print --output-format json`, and returns `completed`, `failed`, `timed_out`, or `unavailable` with the requested/actual provider, exit code, output, error, and fallback flag. Prompts are arguments, not shell input.
+Each node explicitly selects `codex` or `claude`. A `ProviderRequest` carries the prompt, preferred provider, timeout, working directory, and optional command override. The local adapter checks the chosen executable, invokes Codex with `codex exec --json` or Claude with `claude --print --output-format json`, and returns `completed`, `failed`, `timed_out`, or `unavailable` with the requested/actual provider, exit code, output, error, and fallback flag. Prompts are arguments, not shell input.
 
 Only an unavailable Claude executable can fall back to Codex; the result and JSONL proof receipt must record the requested provider, actual provider, fallback flag, and reason. Failed or timed-out runs do not fall back. The helper does not share credentials or translate provider environments. Provider results and receipts prove local invocation only, not quality, portability, staging, production, or goal acceptance.
 

@@ -30,7 +30,7 @@
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Engineering orchestration plugin",
         "operatingSystem": "Codex",
-        "softwareVersion": "0.2.0",
+        "softwareVersion": "0.3.0",
         "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
@@ -194,7 +194,7 @@
           <h2>Configuration</h2>
           <p>An optional project-root <code>.codecanopy.toml</code> may lower or tune these planning limits and weighted model routing. It cannot grant authority.</p>
           <pre aria-label="Canonical CodeCanopy configuration"><code>schema_version = 1
-runtime = "codex"
+runtime = "local"
 
 [tree]
 max_depth = 3
@@ -266,8 +266,8 @@ reasoning_effort = "high"</code></pre>
         <div class="faq" aria-labelledby="faq-title">
           <h2 id="faq-title">Frequently asked questions</h2>
           <details>
-            <summary>Does v0.2 support providers other than Codex?</summary>
-            <p>No. v0.2 supports Codex only. A Claude adapter is tracked as future research, not a current capability.</p>
+            <summary>Does v0.3 support providers other than Codex?</summary>
+            <p>Local runtime support accepts per-node Codex or Claude CLI requests. It records capability checks, explicit fallback, timeouts, isolated worktrees, and hashed proof receipts. This does not claim provider equivalence or production support.</p>
           </details>
           <details>
             <summary>Who creates and verifies isolated worktrees?</summary>
@@ -289,9 +289,9 @@ reasoning_effort = "high"</code></pre>
           <li><a href="https://github.com/adhit-r/codecanopy/issues/1">v0.2 current work — issue #1</a></li>
           <li><a href="https://github.com/adhit-r/codecanopy/issues/2">GitHub Pages follow-up — issue #2</a></li>
           <li><a href="https://github.com/adhit-r/codecanopy/issues/3">Good first issue — issue #3</a></li>
-          <li><a href="https://github.com/adhit-r/codecanopy/issues/4">Future Claude adapter research — issue #4</a></li>
-          <li><a href="https://github.com/adhit-r/codecanopy/issues/5">Future mixed-provider CLI research — issue #5</a></li>
-          <li><a href="https://github.com/adhit-r/codecanopy/issues/6">Future resumable manifest — issue #6</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/4">Local Claude adapter — issue #4</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/5">Mixed-provider trees — issue #5</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/6">Resumable manifests — issue #6</a></li>
         </ul>
       </section>
     </main>

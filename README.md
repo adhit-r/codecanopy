@@ -46,7 +46,7 @@ Copy the bundled [`codecanopy.toml`](plugins/code-canopy/skills/code-canopy/asse
 
 ```toml
 schema_version = 1
-runtime = "codex"
+runtime = "local"
 
 [tree]
 max_depth = 3
@@ -62,7 +62,7 @@ retry_limit = 1
 
 The strongest configured tier owns requirements, material questions, integration, and replanning. Smaller configured tiers receive bounded work. Model availability and host limits still apply.
 
-Provider and timeout are per-node `ProviderRequest` values, not TOML settings. Local support checks an installed CLI, then invokes either `codex exec --skip-git-repo-check --json` or `claude --print --output-format json` without a shell. The only fallback is an unavailable Claude executable to Codex, and the result/receipt flags it. Local support does not copy credentials, choose a provider silently, or claim that provider policies or model quality are equivalent.
+Provider and timeout are per-node `ProviderRequest` values, not TOML settings. Local support checks an installed CLI, then invokes either `codex exec --json` or `claude --print --output-format json` without a shell. The only fallback is an unavailable Claude executable to Codex, and the result/receipt flags it. Local support does not copy credentials, choose a provider silently, or claim that provider policies or model quality are equivalent.
 
 ## Safety boundary
 
@@ -70,9 +70,26 @@ The skill never expands the user's authority. Remote writes, destructive actions
 
 Local manifests and proof receipts are append-only JSONL evidence for interrupted-run recovery. Recovery never marks work successful; the parent rechecks the immutable baseline, dependencies, worktree, and evidence before dispatch, otherwise invalidating only downstream nodes. This is local runtime support, not a durable scheduler, distributed lock, secret store, production audit trail, or proof of provider quality.
 
+### Run a mixed-provider tree locally
+
+The runtime accepts a small JSON plan. Each node names its provider and dependencies; the runner records results, receipts, and recovery state without merging or pushing:
+
+```json
+{
+  "run_id": "mixed-example",
+  "nodes": [
+    {"id": "contract", "provider": "codex", "prompt": "Define the contract."},
+    {"id": "backend", "provider": "codex", "depends_on": ["contract"], "prompt": "Implement the backend."},
+    {"id": "ui", "provider": "claude", "depends_on": ["contract"], "prompt": "Implement the UI."}
+  ]
+}
+```
+
+Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --accept-completed` only when a successful CLI exit is the explicit leaf check. Without that flag, results remain `returned` until the parent runs its acceptance check. Add `repo` and `worktree_root` to the plan for detached Git worktrees. A missing Claude CLI may use Codex only when the result records the fallback; failures and timeouts never switch providers.
+
 ## Roadmap
 
-- Current: [Recursive Canopy v0.2](https://github.com/adhit-r/codecanopy/issues/1), [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), and local runtime support tracked by [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
+- Current: Recursive Canopy v0.2 core plus v0.3 local runtime support, [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), and implementation tracking in [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
 - Evidence-gated: real-provider quality, production behavior, and durable multi-process recovery remain unclaimed until separately observed.
 
 A deterministic scheduler remains deferred until real runs show that the local contract cannot honor limits or recovery requirements.

@@ -29,7 +29,7 @@ Use an air-traffic progress-strip operations board. The approved composition is 
 2. Split first viewport: factual promise, definition, actions, and install command on the left; a coherent nested ownership and dependency strip rack on the right.
 3. One continuous operating band: execution sequence, exact `.codecanopy.toml` excerpt, and safety boundary.
 4. Crawlable definition, comparison, visible FAQ, and contributor call to action below the operating band.
-5. Repository and issue links that distinguish shipped Codex behavior from future Claude and mixed-provider roadmap work.
+5. Repository and issue links that distinguish local provider support from evidence-gated provider quality, production, and durable recovery claims.
 
 ## Technical boundary
 

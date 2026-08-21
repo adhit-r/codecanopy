@@ -2,14 +2,15 @@
 
 CodeCanopy is a free, open-source Codex plugin for turning an engineering goal into the smallest useful ownership tree and ordering work through artifact dependencies.
 
-- Runtime: Codex only in v0.2.
+- Runtime: v0.3 local support accepts per-node Codex or Claude CLI requests; the plugin still runs as a Codex skill.
 - Contract: one root lead owns integration and the final verdict; dependency-ready leaves execute; results are verified and integrated bottom-up.
 - Routing: each node receives normalized complexity and size scores; weighted thresholds select worker, expert, lead, or reviewer automatically, with safety overrides for root, integration, security, and uncertainty.
 - Benchmark: the checked-in deterministic policy fixture passes 10/10 routing cases and rejects 3/3 invalid score cases; this is policy evidence, not model quality or latency evidence. Source: https://github.com/adhit-r/codecanopy/blob/main/benchmarks/model_routing.py
 - Boundary: CodeCanopy's root creates and verifies isolated worktrees where needed. The host enforces documented sandbox, approval, model-availability, and concurrency boundaries.
+- Local execution: `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl` runs a bounded mixed-provider plan, records hash-only JSONL receipts, and leaves interrupted nodes recoverable; `--accept-completed` is an explicit local leaf-check choice.
 - Configuration can tune planning limits but cannot grant authority.
 
 Primary page: https://adhit-r.github.io/codecanopy/
 Repository and installation: https://github.com/adhit-r/codecanopy#install
 Current v0.2 work: https://github.com/adhit-r/codecanopy/issues/1
-Future research, not shipped support: Claude adapter https://github.com/adhit-r/codecanopy/issues/4; mixed-provider CLI https://github.com/adhit-r/codecanopy/issues/5.
+Local support issues: Claude adapter https://github.com/adhit-r/codecanopy/issues/4; mixed-provider CLI https://github.com/adhit-r/codecanopy/issues/5; resumable manifests https://github.com/adhit-r/codecanopy/issues/6.

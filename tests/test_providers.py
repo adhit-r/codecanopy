@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from runtime import providers
 
@@ -26,7 +27,7 @@ class ProviderTests(unittest.TestCase):
         )
         self.assertEqual((result.status, result.provider, result.fallback_used), ("completed", "codex", True))
         self.assertEqual(result.receipt_data["fallback_reason"], "preferred provider executable unavailable")
-        self.assertEqual(runner.call_args.args[0], ("/bin/codex", "exec", "--skip-git-repo-check", "--json", "do work"))
+        self.assertEqual(runner.call_args.args[0], ("/bin/codex", "exec", "--json", "do work"))
 
     def test_timeout_returns_a_normalized_result(self) -> None:
         result = providers.execute_provider(
@@ -35,6 +36,19 @@ class ProviderTests(unittest.TestCase):
             runner=Mock(side_effect=subprocess.TimeoutExpired("codex", 2)),
         )
         self.assertEqual((result.status, result.provider), ("timed_out", "codex"))
+
+    def test_provider_environment_does_not_share_known_credentials(self) -> None:
+        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "openai", "ANTHROPIC_API_KEY": "anthropic", "CODEX_API_KEY": "codex"}):
+            providers.execute_provider(
+                providers.ProviderRequest("do work", preferred_provider="claude"),
+                which=lambda name: "/bin/claude" if name == "claude" else None,
+                runner=runner,
+            )
+        environment = runner.call_args.kwargs["env"]
+        self.assertNotIn("OPENAI_API_KEY", environment)
+        self.assertNotIn("CODEX_API_KEY", environment)
+        self.assertEqual("anthropic", environment["ANTHROPIC_API_KEY"])
 
     def test_receipt_hashes_secrets_without_persisting_them(self) -> None:
         request = providers.ProviderRequest("token=secret")
