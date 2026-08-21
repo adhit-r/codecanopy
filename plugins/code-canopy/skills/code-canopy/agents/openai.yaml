@@ -1,4 +1,4 @@
 interface:
   display_name: "CodeCanopy"
-  short_description: "Coordinate bounded engineering agent trees"
-  default_prompt: "Use $code-canopy to plan and execute this engineering goal with the smallest safe agent tree."
+  short_description: "Build the smallest verified Codex agent tree"
+  default_prompt: "Use $code-canopy to plan and execute this engineering goal as the smallest verified recursive agent tree."
