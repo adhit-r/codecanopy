@@ -1,0 +1,26 @@
+[tree]
+max_depth = 3
+max_children_per_node = 3
+max_total_nodes = 9
+max_active_children = 3
+max_subtree_replans = 1
+
+[budget]
+root_integration_reserve_percent = 35
+retry_limit = 1
+
+[models.lead]
+model = "gpt-5.6-sol"
+reasoning = "high"
+
+[models.expert]
+model = "gpt-5.6-terra"
+reasoning = "high"
+
+[models.worker]
+model = "gpt-5.6-luna"
+reasoning = "medium"
+
+[models.reviewer]
+model = "gpt-5.6-terra"
+reasoning = "high"
