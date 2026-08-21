@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-21T04:14:03Z",
+  "title": "Design System: CodeCanopy",
+  "extensions": {
+    "colorMeta": {
+      "paper": {"role": "neutral", "displayName": "Control Paper", "canonical": "#edf2f1", "tonalRamp": ["#474948", "#777979", "#a6a9a9", "#edf2f1", "#f2f5f5", "#f5f8f7", "#f9fafa", "#fcfdfc"]},
+      "paper-strong": {"role": "neutral", "displayName": "Bright Paper", "canonical": "#f8faf8", "tonalRamp": ["#4a4b4a", "#7c7d7c", "#aeafae", "#f8faf8", "#fafbfa", "#fbfcfb", "#fdfdfd", "#fefefe"]},
+      "ink": {"role": "neutral", "displayName": "Runway Ink", "canonical": "#071824", "tonalRamp": ["#02070b", "#040c12", "#051119", "#071824", "#45525b", "#778087", "#a8aeb2", "#d2d5d8"]},
+      "muted": {"role": "neutral", "displayName": "Slate Copy", "canonical": "#415764", "tonalRamp": ["#141a1e", "#212c32", "#2e3d46", "#415764", "#71818b", "#97a3aa", "#bdc4c9", "#dde1e3"]},
+      "rule": {"role": "neutral", "displayName": "Mechanical Rule", "canonical": "#a3b3b8", "tonalRamp": ["#313637", "#525a5c", "#727d81", "#a3b3b8", "#bac6ca", "#ccd5d8", "#dfe4e6", "#eef1f2"]},
+      "planning-blue": {"role": "secondary", "displayName": "Planning Blue", "canonical": "#bed6ea", "tonalRamp": ["#394046", "#5f6b75", "#8596a4", "#bed6ea", "#cee0ef", "#dbe8f3", "#e8f1f8", "#f3f8fb"]},
+      "planning-blue-deep": {"role": "secondary", "displayName": "Deep Planning Blue", "canonical": "#0f5b9a", "tonalRamp": ["#051b2e", "#082e4d", "#0b406c", "#0f5b9a", "#4b84b3", "#7ba5c7", "#abc6dc", "#d4e1ed"]},
+      "accepted-green": {"role": "tertiary", "displayName": "Accepted Green", "canonical": "#cce6c9", "tonalRamp": ["#3d453c", "#667365", "#8fa18d", "#cce6c9", "#d9ecd7", "#e3f1e1", "#edf6ec", "#f6fbf5"]},
+      "accepted-green-deep": {"role": "tertiary", "displayName": "Deep Accepted Green", "canonical": "#1a653b", "tonalRamp": ["#081e12", "#0d331e", "#124729", "#1a653b", "#538c6c", "#81aa93", "#afc9ba", "#d6e3dc"]},
+      "action-orange": {"role": "primary", "displayName": "Safety Orange", "canonical": "#ef5b18", "tonalRamp": ["#481b07", "#782e0c", "#a74011", "#ef5b18", "#f38452", "#f6a580", "#f9c6ae", "#fce1d5"]},
+      "action-orange-hover": {"role": "primary", "displayName": "Safety Orange Hover", "canonical": "#ff6f2c", "tonalRamp": ["#4d210d", "#803816", "#b34e1f", "#ff6f2c", "#ff9361", "#ffb08b", "#ffcdb5", "#ffe5d9"]},
+      "action-orange-border": {"role": "primary", "displayName": "Safety Orange Border", "canonical": "#9b3408", "tonalRamp": ["#2f1002", "#4e1a04", "#6d2406", "#9b3408", "#b46746", "#c88f77", "#dcb8a9", "#eddad3"]}
+    },
+    "typographyMeta": {
+      "display": {"displayName": "Industrial Display", "purpose": "Primary headlines only."},
+      "body": {"displayName": "Neutral Body", "purpose": "Definitions and explanatory text."},
+      "label": {"displayName": "Control Label", "purpose": "Navigation, roles, nodes, and board headers."},
+      "mono": {"displayName": "Command Mono", "purpose": "Installation commands and TOML."}
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      {"name": "compact-board", "value": "1040px"},
+      {"name": "single-column", "value": "760px"}
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Install Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single high-signal install action.",
+      "html": "<a class=\"ds-button-primary\" href=\"#\">INSTALL CODECANOPY</a>",
+      "css": ".ds-button-primary { min-height: 44px; padding: 0 17px; display: inline-flex; align-items: center; justify-content: center; color: #071824; background: #ef5b18; border: 1px solid #9b3408; border-radius: 0; font-family: \"DIN Condensed\", \"Arial Narrow\", sans-serif; font-weight: 850; text-decoration: none; text-transform: uppercase; } .ds-button-primary:hover { background: #ff6f2c; } .ds-button-primary:focus-visible { outline: 3px solid #ef5b18; outline-offset: 3px; }"
+    },
+    {
+      "name": "Secondary Action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A flat paper action for source and documentation links.",
+      "html": "<a class=\"ds-button-secondary\" href=\"#\">VIEW ON GITHUB</a>",
+      "css": ".ds-button-secondary { min-height: 44px; padding: 0 17px; display: inline-flex; align-items: center; justify-content: center; color: #071824; background: transparent; border: 1px solid #071824; border-radius: 0; font-family: \"DIN Condensed\", \"Arial Narrow\", sans-serif; font-weight: 800; text-decoration: none; text-transform: uppercase; } .ds-button-secondary:hover { color: #0f5b9a; } .ds-button-secondary:focus-visible { outline: 3px solid #ef5b18; outline-offset: 3px; }"
+    },
+    {
+      "name": "Control Navigation",
+      "kind": "nav",
+      "description": "Compact uppercase links on the bright control-paper header.",
+      "html": "<nav class=\"ds-nav\"><a href=\"#\">CONTRACT</a><a href=\"#\">CONFIG</a><a href=\"#\">SAFETY</a></nav>",
+      "css": ".ds-nav { display: flex; gap: 24px; background: #f8faf8; } .ds-nav a { min-height: 40px; display: inline-flex; align-items: center; color: #071824; font-family: \"DIN Condensed\", \"Arial Narrow\", sans-serif; font-size: .75rem; font-weight: 750; text-decoration: none; text-transform: uppercase; } .ds-nav a:hover { color: #0f5b9a; } .ds-nav a:focus-visible { outline: 3px solid #ef5b18; outline-offset: 3px; }"
+    },
+    {
+      "name": "Planning Route Strip",
+      "kind": "custom",
+      "refersTo": "planning-strip",
+      "description": "A mechanical ownership record with role, name, responsibility, and dependency.",
+      "html": "<div class=\"ds-route-strip\"><span>LEAF</span><strong>CONTRACT</strong><span>Define acceptance boundary</span><span>ARCHITECTURE</span></div>",
+      "css": ".ds-route-strip { min-height: 43px; display: grid; grid-template-columns: 72px 120px minmax(180px, 1fr) 120px; align-items: center; color: #071824; background: #bed6ea; border: 1px solid #071824; border-radius: 0; } .ds-route-strip > * { padding: 7px 9px; border-right: 1px solid rgba(7,24,36,.32); } .ds-route-strip > *:last-child { border-right: 0; } .ds-route-strip strong, .ds-route-strip span:first-child { font-family: \"DIN Condensed\", \"Arial Narrow\", sans-serif; font-weight: 800; text-transform: uppercase; }"
+    },
+    {
+      "name": "Accepted Goal Strip",
+      "kind": "custom",
+      "refersTo": "accepted-strip",
+      "description": "The terminal proof signal after root acceptance.",
+      "html": "<div class=\"ds-goal-strip\"><span>GOAL</span><strong>Root acceptance with integrated evidence</strong></div>",
+      "css": ".ds-goal-strip { padding: 10px 12px; display: flex; align-items: center; gap: 18px; color: #1a653b; background: #cce6c9; border: 1px solid #071824; border-radius: 0; } .ds-goal-strip span { font-family: \"DIN Condensed\", \"Arial Narrow\", sans-serif; font-size: .7rem; font-weight: 800; text-transform: uppercase; }"
+    },
+    {
+      "name": "Install Command Panel",
+      "kind": "custom",
+      "description": "A bounded copyable command surface without decorative chrome.",
+      "html": "<div class=\"ds-command\"><strong>INSTALL</strong><code>codex plugin add code-canopy@codecanopy</code></div>",
+      "css": ".ds-command { padding: 12px 14px 13px; color: #071824; background: #e2ebeb; border: 1px solid #a3b3b8; border-radius: 0; } .ds-command strong { display: block; margin-bottom: 7px; color: #415764; font-family: \"DIN Condensed\", \"Arial Narrow\", sans-serif; font-size: .72rem; text-transform: uppercase; } .ds-command code { overflow-wrap: anywhere; font: .76rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Flight Strip Control Board",
+    "overview": "CodeCanopy is an engineering operations surface: pale control paper, navy mechanical rules, nested flight strips, and a single safety-orange action signal. The system is dense but calm, making ownership, dependencies, and acceptance physically legible without generic AI imagery or decorative effects.",
+    "keyCharacteristics": [
+      "Split factual copy and nested route rack at desktop width.",
+      "Flat, square, rule-bound surfaces with no ornamental depth.",
+      "Blue means planned work, green means accepted evidence, and orange means action.",
+      "Condensed labels organize the board; neutral body text carries explanations."
+    ],
+    "rules": [
+      {"name": "The Control-Signal Rule", "body": "Orange is reserved for an action a visitor can take; it is never decoration or a work state.", "section": "colors"},
+      {"name": "The Flat Board Rule", "body": "Surfaces stay physically flat; hierarchy is structural, never simulated with glow, glass, or shadow.", "section": "elevation"}
+    ],
+    "dos": [
+      "Do make ownership and artifact dependencies visible before adding decoration.",
+      "Do keep action orange rare and preserve WCAG AA contrast in default, hover, and focus states.",
+      "Do collapse narrow layouts to one readable route while retaining a root-to-goal proof.",
+      "Do use green only for accepted evidence or the verified goal."
+    ],
+    "donts": [
+      "Don't add gradients, purple, glow, glass, shadows, rounded SaaS cards, or generic AI network imagery.",
+      "Don't use emoji or Unicode glyphs as interface icons.",
+      "Don't invent runtime states, timestamps, checks, adoption metrics, or provider support.",
+      "Don't place detached eyebrow copy above the primary headline."
+    ]
+  }
+}
