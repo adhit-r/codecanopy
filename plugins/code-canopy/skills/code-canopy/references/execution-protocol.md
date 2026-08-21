@@ -4,7 +4,7 @@ Read this only when a canopy node will modify a repository or create a commit.
 
 ## Dispatch packet
 
-Send only: node and parent IDs, objective, deliverable, non-goals, baseline commit, relevant paths and evidence, dependencies, write scope, acceptance check, budget, delegation permission, and stop condition. Do not copy the full transcript by default. Point to files and line ranges; store long logs as artifacts.
+Send only: node and parent IDs; objective, deliverable, and non-goals; baseline commit; relevant paths and evidence; produced and consumed artifacts; dependency IDs; write scope; acceptance check; model tier; remaining depth, node, active-child, and budget allowance; delegation permission; and stop condition. Do not copy the full transcript by default. Point to files and line ranges; store long logs as artifacts.
 
 Workers return only:
 
@@ -20,13 +20,14 @@ blocker: <exact obstacle or none>
 
 Stop a lane when its check passes. Retry a transient failure once only when new evidence justifies it. Send contradictory reports to one reviewer; do not fan out again.
 
-## Git isolation
+## Git isolation and ownership
 
 - Preserve unrelated dirty changes. Stop if they overlap assigned paths.
 - In `edit` mode, workers stay read-only and return scoped patch instructions; the root alone edits. Use isolated writing workers only in `local-commit` or `remote` mode.
-- Give each writer a unique branch and worktree from the recorded baseline. One writer owns a path. The root owns shared manifests, lockfiles, generated schemas, and integration files unless explicitly assigned.
+- Give each writer a unique branch and worktree rooted at the recorded baseline. Child branches remain rooted at that baseline until their parent integrates them.
+- One writer owns a path. A child inherits its parent's path ownership and may narrow it, never expand it. Shared files return to the nearest common parent: this includes manifests, lockfiles, generated schemas, and integration files.
 - A worker edits only its scope, inspects its diff, runs its check, and creates one focused commit only in `local-commit` or `remote` mode. It never merges, rebases, pushes, or opens a pull request.
-- The root reviews each diff and baseline before integrating accepted commits in dependency order. Never resolve conflicts by taking `ours` or `theirs` wholesale.
+- A parent reviews each accepted child diff and baseline before integrating it in artifact dependency order; the root performs the final integration. Never resolve conflicts by taking `ours` or `theirs` wholesale.
 - Never clean, reset, restore user files, delete branches or worktrees, force-push, alter remotes, expose secrets, or run destructive migrations without explicit target-specific authorization.
 
 ## Integration and evidence
