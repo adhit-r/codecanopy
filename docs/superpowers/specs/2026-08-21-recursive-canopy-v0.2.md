@@ -43,6 +43,8 @@ A node is atomic when it has one bounded deliverable and owner, one explicit acc
 
 Never split merely into research, implementation, testing, or reporting phases when one agent can own the complete outcome.
 
+Depth capacity applies when a node proposes children. A leaf at the configured maximum depth can still become ready and execute when its dependencies, scope, baseline, budget, and acceptance check are valid.
+
 ## Node contract
 
 Each node records: ID, parent, role, objective, deliverable, non-goals, baseline, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode.
@@ -76,6 +78,8 @@ The lead owns material user questions, architecture, security-sensitive decision
 ## Configuration
 
 An optional project-root `.codecanopy.toml` may lower or tune planning limits and preferred model mappings. Unknown keys or invalid values are ignored with a visible warning; built-in safe defaults remain active. Precedence is host/admin policy, explicit current user instruction, project configuration, then built-in defaults.
+
+The public v0.2 schema uses `max_parallel`, `max_replans`, `root_reserve_percent`, and `reasoning_effort`. Documentation and the bundled asset must use these exact names.
 
 Configuration cannot grant Git, network, destructive, credential, production, or publication authority.
 

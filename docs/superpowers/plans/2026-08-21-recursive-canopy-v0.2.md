@@ -42,11 +42,11 @@ Document: contract, candidate split, Leaf Test, ownership tree plus artifact DAG
 
 - [ ] **Step 3: Add the runtime contract reference**
 
-Define node fields, state transitions, readiness, integration barriers, collision handling, retry behavior, subtree invalidation, normalized result, and the distinction between behavioral requirements and host enforcement.
+Define node fields, state transitions, readiness, integration barriers, collision handling, retry behavior, subtree invalidation, normalized result, and the distinction between behavioral requirements and host enforcement. Maximum-depth capacity gates further delegation; it must not block an already-planned leaf from becoming ready.
 
 - [ ] **Step 4: Add the TOML asset**
 
-Ship the approved defaults under `[tree]`, `[budget]`, and the four `[models.*]` tables. Include only tunable limits and model preferences; omit permission or Git-authority settings.
+Ship the approved defaults under `[tree]`, `[budget]`, and the four `[models.*]` tables. Use the public keys `max_parallel`, `max_replans`, `root_reserve_percent`, and `reasoning_effort` consistently across the asset and documentation. Include only tunable limits and model preferences; omit permission or Git-authority settings.
 
 - [ ] **Step 5: Validate the skill structure**
 
