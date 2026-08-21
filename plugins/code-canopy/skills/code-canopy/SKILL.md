@@ -50,7 +50,7 @@ Default limits: root depth `0`; maximum depth `3`; three children per node; nine
 5. Accept results bottom-up: a parent verifies required child artifacts, runs its own integration check, and emits one normalized result upward.
 6. On changed contracts or failed dependent evidence, replan only the affected subtree. Stop only when root acceptance passes.
 
-Use the [runtime contract](references/runtime-contract.md) for states, readiness, collision, retry, invalidation, normalized results, and the Codex host boundary.
+Use the [runtime contract](references/runtime-contract.md) for states, readiness, collision, retry, invalidation, and normalized results. Use the [Codex adapter](references/codex-adapter.md) for current role-model mappings and documented host boundaries.
 
 Requested headcount is not work. Never create agents to meet a number, restate context, or write the final report.
 

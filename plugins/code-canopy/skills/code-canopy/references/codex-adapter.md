@@ -15,7 +15,7 @@ Use the smallest capable tier for bounded execution. If a preferred model is una
 
 ## Host boundary
 
-CodeCanopy plans within its configured limits, but Codex and its host environment enforce model availability, concurrency, worktree isolation, sandbox policy, permissions, and approvals. Effective concurrency is the lower of the CodeCanopy configuration and the host limit.
+CodeCanopy plans within its configured limits, but Codex and its host environment enforce documented model availability, concurrency, sandbox policy, permissions, and approvals. CodeCanopy and the root must explicitly create and verify worktree isolation where it is needed. Effective concurrency is the lower of the CodeCanopy configuration and the host limit.
 
 No documented Codex setting enforces CodeCanopy's maximum depth or total-node limit. The planner must record and honor those limits itself; this adapter does not claim host enforcement where none is documented.
 
