@@ -4,7 +4,7 @@
 
 **Goal:** Ship a small static GitHub Pages landing page that explains and demonstrates Recursive Canopy v0.2.
 
-**Architecture:** Build one semantic HTML document and one stylesheet under `docs/`. Recreate the approved route composition with nested lists and CSS geometry; use no JavaScript, framework, remote font, or raster production asset.
+**Architecture:** Build one semantic HTML document and one stylesheet under `docs/`. Recreate the approved split composition with nested lists and CSS geometry; use no JavaScript, framework, remote font, or runtime dependency. Add only the small static discovery files required by the current public page.
 
 **Tech Stack:** HTML5, CSS3, GitHub Pages.
 
@@ -15,7 +15,7 @@
 - Static `docs/index.html` plus `docs/styles.css`.
 - No runtime dependency or JavaScript.
 - No gradients, purple, glow, glass, emoji, generic AI imagery, fabricated proof, or unsupported capability claim.
-- Approved composition: `.impeccable/mocks/codecanopy-route-b.webp`.
+- Approved composition: `.impeccable/mocks/codecanopy-route-a.webp`.
 - Safety orange is reserved for actionable elements.
 
 ---
@@ -125,3 +125,38 @@ Use the `github-pages` environment with the deployment URL output and one `pages
 - [ ] **Step 3: Validate workflow structure**
 
 Parse the YAML with an available local parser and inspect that the artifact path is exactly `./docs`. After integration and push, require a successful Pages workflow run before claiming the public site is live.
+
+### Task 4: User-approved split composition and public discovery
+
+**Files:**
+- Modify: `docs/index.html`
+- Modify: `docs/styles.css`
+- Create: `docs/favicon.svg`
+- Create: `docs/robots.txt`
+- Create: `docs/sitemap.xml`
+- Create: `docs/llms.txt`
+- Create after the final render: `docs/codecanopy-social.png`
+
+**Interfaces:**
+- Consumes: the user-approved option A mock, canonical v0.2 configuration, and published GitHub issue URLs.
+- Produces: the final responsive page, crawl metadata, and contributor paths.
+
+- [ ] **Step 1: Rebuild the first viewport from option A**
+
+Use a split headline/actions and nested strip-rack composition. Remove the detached eyebrow, fake timestamps, impossible state transitions, decorative Unicode icon glyphs, and the `Impact` fallback. Make the mobile install command wrap without horizontal overflow.
+
+- [ ] **Step 2: Add truthful search and social metadata**
+
+Add one descriptive title, one unique meta description, canonical URL, Open Graph and Twitter fields, a real favicon, and JSON-LD that describes CodeCanopy as a free developer application without ratings, adoption, or unsupported provider claims.
+
+- [ ] **Step 3: Add crawlable answer and contribution content**
+
+Place a direct definition near the top, a compact comparison with unbounded swarms, a visible FAQ, and links to the current-work, roadmap, and good-first-issue tickets. State that Claude and mixed-provider CLI execution are roadmap research, not shipped support.
+
+- [ ] **Step 4: Add minimal machine-readable discovery files**
+
+Allow crawling through `robots.txt`, list only the canonical home page in `sitemap.xml`, and summarize the public contract and links in `llms.txt`. Do not add a blog, analytics, keyword pages, or generated content system.
+
+- [ ] **Step 5: Verify rendered and machine-readable output**
+
+Parse HTML and JSON-LD, check public URLs and local assets, verify zero console/resource errors, and confirm no horizontal overflow at 1440px and 390px. Capture the accepted 1200x630 render as the social preview. Then continue Task 2 from screenshot capture; the detector has already run once and must not be repeated.

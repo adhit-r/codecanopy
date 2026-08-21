@@ -27,7 +27,7 @@ Static HTML and CSS under `docs/`; no runtime dependencies or required JavaScrip
 
 Air-traffic flight-progress-strip operations board. Pale cool-gray control surface, deep navy-black ink, paper-strip blue and pale green state fields, and safety orange used only for actions. Condensed industrial display lettering is paired with a neutral readable body face; monospace is limited to actual commands and configuration. The page is structured as a routed control surface rather than a conventional SaaS hero.
 
-Approved composition: `.impeccable/mocks/codecanopy-route-b.webp`. Approval was delegated by the user's request for a small GitHub Pages site. Preserve the diagonal critical route from user requirement through nested strips to verified goal, but replace all illustrative values with the actual v0.2 contract.
+Approved composition: `.impeccable/mocks/codecanopy-route-a.webp`, explicitly approved by the user from the rendered image on 2026-08-21. Preserve its split first viewport: factual headline and actions on the left, nested progress-strip rack on the right, and one continuous operations band below. Replace every illustrative value with the actual v0.2 contract.
 
 ## Memorable moment
 
@@ -38,13 +38,14 @@ The first viewport makes the critical path physically legible: nested work strip
 | Element | Commitment | Medium |
 |---|---|---|
 | Navigation | Compact wordmark, Contract, Safety, GitHub, Install | Semantic HTML/CSS |
-| Headline | Lives inside the route field, not a detached hero block | HTML/CSS |
-| Requirement and goal strips | Opposing endpoints of one routed sequence | HTML/CSS |
+| Headline | Large factual promise and definition in the left first-viewport column | HTML/CSS |
+| Requirement and goal strips | Root-to-leaf rack with coherent example dependencies and states | HTML/CSS |
 | Nested agent strips | Root, contract, implementation, and verification with honest example states | Nested lists and CSS |
-| Dependency route | One responsive line system connecting the endpoints and nodes | Authored SVG or CSS borders |
+| Dependency route | Nested rack geometry that becomes a vertical list on narrow screens | CSS borders |
 | Primary action | Solid safety-orange Install link with clear focus state | Anchor and CSS |
 | Operating sequence | Leaf Test, Critical Frontier, Parent Acceptance in one continuous band | Semantic ordered content |
 | Configuration | Exact v0.2 TOML defaults | `pre` and `code` |
 | Safety close | Honest host-enforcement boundary and GitHub action | Semantic HTML/CSS |
+| Discovery | Canonical/social metadata, visible definition and FAQ, sitemap, robots, and contributor actions | Static files and JSON-LD |
 
 No raster image is required in the shipped page; the visual driver is precise interface geometry that must remain responsive and semantic.

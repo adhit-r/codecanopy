@@ -14,7 +14,7 @@ The page may state only behavior defined by the v0.2 skill and runtime contract.
 
 ## Visual direction
 
-Use an air-traffic progress-strip operations board. The approved composition is `.impeccable/mocks/codecanopy-route-b.webp`; its route structure is authoritative, while all illustrative commands and states must be replaced by real CodeCanopy content.
+Use an air-traffic progress-strip operations board. The approved composition is `.impeccable/mocks/codecanopy-route-a.webp`; its split first viewport and operations-band structure are authoritative, while all illustrative commands and states must be replaced by real CodeCanopy content.
 
 - Pale cool-gray control surface.
 - Deep navy-black ink and fine mechanical rules.
@@ -25,15 +25,15 @@ Use an air-traffic progress-strip operations board. The approved composition is 
 
 ## Structure
 
-1. Compact navigation with wordmark, Contract, Safety, GitHub, and Install.
-2. First-viewport critical route from requirement through a nested ownership tree to verified goal.
-3. One continuous operating-sequence band: Leaf Test, Critical Frontier, Parent Acceptance.
-4. Exact `.codecanopy.toml` default excerpt.
-5. Safety boundary and GitHub close.
+1. Compact navigation with wordmark, one-line product descriptor, Contract, Config, Safety, GitHub, and Install.
+2. Split first viewport: factual promise, definition, actions, and install command on the left; a coherent nested ownership and dependency strip rack on the right.
+3. One continuous operating band: execution sequence, exact `.codecanopy.toml` excerpt, and safety boundary.
+4. Crawlable definition, comparison, visible FAQ, and contributor call to action below the operating band.
+5. Repository and issue links that distinguish shipped Codex behavior from future Claude and mixed-provider roadmap work.
 
 ## Technical boundary
 
-- `docs/index.html` and `docs/styles.css` only unless a small authored SVG file materially improves accessibility or responsiveness.
+- Keep the implementation static and dependency-free. In addition to `docs/index.html` and `docs/styles.css`, allow only small crawl/discovery assets that serve a current need: favicon, social preview, `robots.txt`, `sitemap.xml`, and `llms.txt`.
 - GitHub Pages is configured with `build_type: workflow`; one minimal workflow must upload only `docs/` and deploy it through the official Pages actions.
 - No framework, package manager, web font request, analytics, runtime JavaScript, or external asset dependency.
 - Responsive at 360px, 768px, and 1440px widths.
@@ -47,6 +47,9 @@ Use an air-traffic progress-strip operations board. The approved composition is 
 - The first viewport communicates requirement, nested tree, verification path, and primary action.
 - Install and GitHub links are correct and keyboard reachable.
 - Configuration values match the v0.2 runtime contract.
+- The title, description, canonical URL, social metadata, visible definition, and structured data agree with the shipped page.
+- `robots.txt`, `sitemap.xml`, and `llms.txt` expose only public, truthful URLs and capabilities.
+- Current-work and roadmap issue links are visible and clearly labeled.
 - The Impeccable detector has no unresolved mechanical blocker.
 - Desktop and mobile screenshots receive an independent finish verdict.
 - A push to `main` triggers the Pages workflow and deploys the `docs/` artifact.
