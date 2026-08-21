@@ -12,7 +12,7 @@ Use an ownership tree for parent authority, scope, budget, questions, and integr
 
 `draft -> planned -> ready -> active -> returned -> accepted` is the successful path. A node may move to `blocked` when required evidence, authorization, or a clean scope is unavailable. A changed contract or failed prerequisite moves affected descendants to `invalidated`; they return to `draft` only through an allowed subtree replan.
 
-A planned leaf is ready only when all consumed artifacts and dependency nodes are accepted, its baseline remains valid, its assigned paths do not overlap an active writer, it has remaining effective depth, node, active-child, and budget capacity, and its acceptance check is explicit. Dispatch the deepest ready critical-path leaves first.
+A planned leaf is ready when all consumed artifacts and dependency nodes are accepted, its baseline remains valid, its assigned paths do not overlap an active writer, its acceptance check is explicit, and its execution fits the remaining budget. Depth and total-node capacity gate creating children; active-child capacity gates dispatch, not readiness. Dispatch the deepest ready critical-path leaves first within the active-child limit.
 
 ## Integration barriers and collisions
 

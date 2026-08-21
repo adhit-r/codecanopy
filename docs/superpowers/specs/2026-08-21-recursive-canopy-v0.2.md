@@ -43,7 +43,7 @@ A node is atomic when it has one bounded deliverable and owner, one explicit acc
 
 Never split merely into research, implementation, testing, or reporting phases when one agent can own the complete outcome.
 
-Depth capacity applies when a node proposes children. A leaf at the configured maximum depth can still become ready and execute when its dependencies, scope, baseline, budget, and acceptance check are valid.
+Depth and total-node capacity apply when a node proposes children. A leaf at the configured maximum depth can still become ready when its dependencies, scope, baseline, budget, and acceptance check are valid; active-child capacity controls when that ready leaf is dispatched.
 
 ## Node contract
 
