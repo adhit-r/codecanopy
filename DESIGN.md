@@ -96,8 +96,10 @@ The palette behaves like an operations board: cool paper and navy ink establish 
 
 ## Typography
 
-**Display Font:** DIN Condensed with Arial Narrow and Aptos Narrow fallbacks  
-**Body Font:** Native system sans stack  
+**Display Font:** DIN Condensed with Arial Narrow and Aptos Narrow fallbacks
+
+**Body Font:** Native system sans stack
+
 **Label/Mono Font:** Condensed display stack for controls; native monospace for commands and TOML
 
 The condensed face gives headlines and labels the authority of industrial signage. Body and code stacks remain familiar and readable.
