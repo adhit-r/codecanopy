@@ -47,7 +47,7 @@ Depth and total-node capacity apply when a node proposes children. A leaf at the
 
 ## Node contract
 
-Each node records: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode.
+Each node records: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, normalized complexity score, normalized size score, weighted routing score, selected model tier, remaining budget, delegation permission, stop condition, and Git mode.
 
 Workers return: status, result, files, commit or diff, checks, evidence, and exact blocker.
 
@@ -74,6 +74,8 @@ Use capability roles in the core contract. The Codex adapter maps current prefer
 - Reviewer: `gpt-5.6-terra`, high reasoning.
 
 The lead owns material user questions, architecture, security-sensitive decisions, integration, and replanning. Smaller models receive bounded execution. Unavailable models fall back only to a safe available tier or return to the lead; integration and review must not silently downgrade.
+
+During planning, the root estimates each node's normalized complexity and size from observable evidence and applies the configured weighted routing score automatically. Simple work selects `worker`, medium work selects `expert`, complex work selects `lead`, and review work selects `reviewer`. Root, integration, security-sensitive, and uncertain work never routes below the safe stronger tier. This is a declarative planning contract; host model availability remains independent.
 
 ## Configuration
 
