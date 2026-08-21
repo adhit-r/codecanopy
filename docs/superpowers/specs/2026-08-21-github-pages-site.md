@@ -34,6 +34,7 @@ Use an air-traffic progress-strip operations board. The approved composition is 
 ## Technical boundary
 
 - `docs/index.html` and `docs/styles.css` only unless a small authored SVG file materially improves accessibility or responsiveness.
+- GitHub Pages is configured with `build_type: workflow`; one minimal workflow must upload only `docs/` and deploy it through the official Pages actions.
 - No framework, package manager, web font request, analytics, runtime JavaScript, or external asset dependency.
 - Responsive at 360px, 768px, and 1440px widths.
 - Semantic landmarks, visible keyboard focus, reduced-motion handling, and WCAG AA text contrast.
@@ -48,3 +49,4 @@ Use an air-traffic progress-strip operations board. The approved composition is 
 - Configuration values match the v0.2 runtime contract.
 - The Impeccable detector has no unresolved mechanical blocker.
 - Desktop and mobile screenshots receive an independent finish verdict.
+- A push to `main` triggers the Pages workflow and deploys the `docs/` artifact.

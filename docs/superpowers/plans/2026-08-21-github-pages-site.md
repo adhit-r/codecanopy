@@ -104,3 +104,24 @@ Provide the request, approved mock, screenshots, direction contract, detector ou
 - [ ] **Step 4: Document the shipped system**
 
 Run the Impeccable documenter against the finished page so `DESIGN.md` records actual palette, type, spacing, strip geometry, action behavior, responsive rules, and prohibited generic patterns.
+
+### Task 3: GitHub Pages deployment
+
+**Files:**
+- Create: `.github/workflows/pages.yml`
+
+**Interfaces:**
+- Consumes: accepted static files under `docs/` and the repository's existing GitHub Pages Actions mode.
+- Produces: one deployment workflow that publishes only the `docs/` artifact from `main`.
+
+- [ ] **Step 1: Add the official static Pages workflow**
+
+Trigger on pushes to `main` that change `docs/**` or the workflow itself, plus `workflow_dispatch`. Grant only `contents: read`, `pages: write`, and `id-token: write`. Use `actions/checkout@v6`, `actions/configure-pages@v5`, `actions/upload-pages-artifact@v4` with `path: ./docs`, and `actions/deploy-pages@v4`.
+
+- [ ] **Step 2: Preserve deployment serialization**
+
+Use the `github-pages` environment with the deployment URL output and one `pages` concurrency group with `cancel-in-progress: false`.
+
+- [ ] **Step 3: Validate workflow structure**
+
+Parse the YAML with an available local parser and inspect that the artifact path is exactly `./docs`. After integration and push, require a successful Pages workflow run before claiming the public site is live.
