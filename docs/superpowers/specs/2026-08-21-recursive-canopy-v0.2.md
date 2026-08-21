@@ -32,7 +32,7 @@ For every node:
 3. If atomic, complete the node directly.
 4. Otherwise split into independently usable outcome contracts, record artifacts and dependencies, reserve parent integration capacity, and recursively plan delegation-enabled children.
 5. Collapse a split when coordination cost exceeds parallel or specialist value.
-6. Dispatch the deepest critical-path leaves that are ready and within all effective limits.
+6. Before dispatching a source-level leaf with accepted dependencies, have the root integrate those commits in DAG order into a fresh immutable baseline; then dispatch the deepest critical-path leaves that are ready and within all effective limits.
 7. Verify and integrate accepted results bottom-up.
 8. Replan only the invalid dependent subtree.
 9. Stop when root acceptance passes.
@@ -47,7 +47,7 @@ Depth and total-node capacity apply when a node proposes children. A leaf at the
 
 ## Node contract
 
-Each node records: ID, parent, role, objective, deliverable, non-goals, baseline, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode.
+Each node records: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode.
 
 Workers return: status, result, files, commit or diff, checks, evidence, and exact blocker.
 
@@ -89,6 +89,7 @@ Configuration cannot grant Git, network, destructive, credential, production, or
 - One writer owns a path at a time.
 - Shared files, lockfiles, generated schemas, and integration files return to the nearest common parent.
 - Baseline drift or dirty overlap stops the affected lane.
+- Accepted source dependencies are materialized by the root into an immutable checkpoint before a dependent leaf runs; changed dependencies invalidate affected descendants.
 - Children never merge, rebase, push, open pull requests, or resolve shared conflicts.
 - One evidence-based retry is allowed; repeated or semantic failure returns to the parent.
 - Contract changes invalidate only dependent descendants; accepted unrelated work remains valid.

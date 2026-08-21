@@ -26,7 +26,7 @@ CodeCanopy keeps two structures separate:
 - The ownership tree records who owns scope, delegation, questions, and integration.
 - The artifact dependency graph records which verified outputs must exist before a leaf can run.
 
-The root applies a Leaf Test before delegation. Atomic work stays with one agent. Non-atomic work splits only into independently verifiable outcomes, runs from the deepest dependency-ready frontier, and returns upward through parent acceptance checks. Changed contracts invalidate only dependent descendants.
+The root applies a Leaf Test before delegation. Atomic work stays with one agent. Non-atomic work splits only into independently verifiable outcomes, runs from the deepest dependency-ready frontier, and returns upward through parent acceptance checks. Before dependent source work runs, the root materializes its accepted predecessors into an immutable baseline. Changed contracts invalidate only dependent descendants.
 
 ```text
 Goal lead

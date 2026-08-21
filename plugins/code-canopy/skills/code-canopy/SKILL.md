@@ -21,7 +21,7 @@ Record:
 - Evidence tier: static, unit, integration, staging, or production.
 - Repository, branch, baseline commit, dirty files, and existing worktrees.
 - Git mode: `read-only`, `edit`, `local-commit`, or `remote`. In `edit`, only the root writes; parallel writers require commit mode. Infer no more authority than the request grants.
-- Node contract: ID, parent, role, objective, deliverable, non-goals, baseline, read and write scope, produced and consumed artifacts, dependencies, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode.
+- Node contract: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read and write scope, produced and consumed artifacts, dependencies, acceptance check, evidence tier, model tier, remaining budget, delegation permission, stop condition, and Git mode.
 - Effective limits and model preferences. Start with the bundled [defaults](assets/codecanopy.toml); host/admin policy and an explicit current user instruction take precedence over an optional project-root `.codecanopy.toml`, which takes precedence over built-in defaults. Unknown or invalid project values are ignored with a visible warning.
 
 Use a platform goal tracker only when the user explicitly requests a tracked goal.
@@ -46,7 +46,7 @@ Default limits: root depth `0`; maximum depth `3`; three children per node; nine
 1. Establish the node contract, inspect scoped evidence and callers, then identify a candidate split.
 2. Apply the Leaf Test: a node is atomic when it has one bounded deliverable and owner, one explicit acceptance check, coherent read or write scope, no unresolved user, product, or security decision, no dependency on a sibling's unfinished output, and fits its remaining model and planning limits.
 3. For a non-atomic node, split only into independently usable outcome contracts. Delegate only when delegation is explicitly allowed and there is remaining depth, remaining total-node capacity, disjoint scope, explicit acceptance, and useful parallel or specialist value. Collapse the split when coordination costs more than that value.
-4. Record the ownership tree and artifact DAG. Reserve parent integration capacity, then dispatch the deepest dependency-ready critical-path leaves within effective limits.
+4. Record the ownership tree and artifact DAG. Reserve parent integration capacity. Before dispatching a source-level leaf with accepted dependencies, the root integrates those commits in DAG order into a fresh immutable baseline and records it in the node packet. Then dispatch the deepest dependency-ready critical-path leaves within effective limits.
 5. Accept results bottom-up: a parent verifies required child artifacts, runs its own integration check, and emits one normalized result upward.
 6. On changed contracts or failed dependent evidence, replan only the affected subtree. Stop only when root acceptance passes.
 

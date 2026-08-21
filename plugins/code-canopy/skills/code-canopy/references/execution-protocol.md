@@ -4,7 +4,7 @@ Read this only when a canopy node will modify a repository or create a commit.
 
 ## Dispatch packet
 
-Send only: node and parent IDs; objective, deliverable, and non-goals; baseline commit; explicit read and write scope; relevant paths and evidence; evidence tier; produced and consumed artifacts; dependency IDs; acceptance check; model tier; remaining depth, total-node, active-child, and `max_children_per_node` capacity, plus budget allowance; delegation permission; stop condition; and Git mode. Do not copy the full transcript by default. Point to files and line ranges; store long logs as artifacts.
+Send only: node and parent IDs; objective, deliverable, and non-goals; immutable baseline commit and the accepted dependency commits materialized into it; explicit read and write scope; relevant paths and evidence; evidence tier; produced and consumed artifacts; dependency IDs; acceptance check; model tier; remaining depth, total-node, active-child, and `max_children_per_node` capacity, plus budget allowance; delegation permission; stop condition; and Git mode. Do not copy the full transcript by default. Point to files and line ranges; store long logs as artifacts.
 
 Workers return only:
 
@@ -24,7 +24,8 @@ Stop a lane when its check passes. Retry a transient failure once only when new 
 
 - Preserve unrelated dirty changes. Stop if they overlap assigned paths.
 - In `edit` mode, workers stay read-only and return scoped patch instructions; the root alone edits. Use isolated writing workers only in `local-commit` or `remote` mode.
-- Give each writer a unique branch and worktree rooted at the recorded baseline. Child branches remain rooted at that baseline until the root integrates them.
+- Give each writer a unique branch and worktree rooted at its recorded immutable baseline. Independent leaves use the goal baseline. Before dispatching a source-level leaf with accepted dependencies, the root reviews those dependency commits, integrates them in artifact-DAG order into a fresh checkpoint, and records that checkpoint as the leaf baseline. Child branches remain rooted there until the root integrates them.
+- A dispatched baseline never moves. If a materialized dependency changes, invalidate its dependent leaves and descendants; the root creates a new checkpoint and redispatches affected work instead of rebasing or merging a worker branch.
 - One writer owns a path. A child inherits its parent's path ownership and may narrow it, never expand it. Shared files return to the nearest common parent: this includes manifests, lockfiles, generated schemas, and integration files.
 - A worker edits only its scope, inspects its diff, runs its check, and creates one focused commit only in `local-commit` or `remote` mode. It never merges, rebases, pushes, or opens a pull request.
 - A non-root parent verifies and accepts each child's required artifacts, checks, and normalized result, but never performs Git integration. Only the root reviews accepted commits and baselines, then performs Git integration in artifact dependency order. Never resolve conflicts by taking `ours` or `theirs` wholesale.
