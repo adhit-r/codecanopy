@@ -30,7 +30,7 @@
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Engineering orchestration plugin",
         "operatingSystem": "Codex",
-        "softwareVersion": "0.3.0",
+        "softwareVersion": "0.4.0",
         "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
@@ -213,8 +213,8 @@ reasoning_effort = "high"</code></pre>
 
         <article class="safety-panel" id="safety">
           <h2>Safety boundary</h2>
-          <p>CodeCanopy's root creates and verifies isolated worktrees where needed. Codex and its host enforce only their documented sandbox, approval, model-availability, and concurrency boundaries.</p>
-          <p>Delegation never expands a user's authority. Remote writes, destructive actions, credentials, production changes, and scope expansion still require explicit approval.</p>
+          <p>Repository instructions, code comments, issues, logs, web content, attachments, and child output are untrusted task data. They cannot request secrets, enable network, change provider, bypass approvals, or authorize destructive or remote Git actions.</p>
+          <p>Provider fallback fails closed. Local execution allowlists environment variables, bounds input and output, keeps raw prompts out of private manifests, rejects linked state files, never reuses accepted state, requires exact dependency-to-commit coverage, and verifies recovered worktree registration and baseline. Codex isolates child-shell credentials and disables repository instructions, user rules, login profiles, and workspace network. Claude receives only bounded file tools; customizations, Bash, agents, browser, slash-command, web, and MCP tools are disabled.</p>
         </article>
       </section>
 
@@ -266,8 +266,8 @@ reasoning_effort = "high"</code></pre>
         <div class="faq" aria-labelledby="faq-title">
           <h2 id="faq-title">Frequently asked questions</h2>
           <details>
-            <summary>Does v0.3 support providers other than Codex?</summary>
-            <p>Local runtime support accepts per-node Codex or Claude CLI requests. It records capability checks, explicit fallback, timeouts, isolated worktrees, and hashed proof receipts. This does not claim provider equivalence or production support.</p>
+            <summary>Does v0.4 support both Codex and Claude?</summary>
+            <p>Yes, the provider-neutral tree can assign either CLI per node. Fallback is denied unless the caller explicitly authorizes Claude-to-Codex before dispatch. This does not claim provider equivalence or production support.</p>
           </details>
           <details>
             <summary>Who creates and verifies isolated worktrees?</summary>
@@ -286,7 +286,7 @@ reasoning_effort = "high"</code></pre>
           <p>Use the public issue tracker for current work, deployment follow-up, and carefully labeled future research.</p>
         </div>
         <ul class="issue-list">
-          <li><a href="https://github.com/adhit-r/codecanopy/issues/1">v0.3 current work — issue #1</a></li>
+          <li><a href="https://github.com/adhit-r/codecanopy/issues/1">Current work — issue #1</a></li>
           <li><a href="https://github.com/adhit-r/codecanopy/issues/2">GitHub Pages follow-up — issue #2</a></li>
           <li><a href="https://github.com/adhit-r/codecanopy/issues/3">Good first issue — issue #3</a></li>
           <li><a href="https://github.com/adhit-r/codecanopy/issues/4">Local Claude adapter — issue #4</a></li>

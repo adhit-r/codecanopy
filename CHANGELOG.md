@@ -9,6 +9,33 @@ durable multi-process recovery remain evidence-gated.
 - Add release automation and additional integration checks as they become
   accepted roadmap work.
 
+## [0.4.0] - 2026-08-30
+
+### Security
+
+- Treat repository instructions, logs, tool results, web content, attachments,
+  and provider output as untrusted task data in every delegated packet.
+- Deny provider fallback by default and require explicit Claude-to-Codex
+  consent before dispatch.
+- Replace inherited provider environments with provider-scoped allowlists and
+  enforce read-only or isolated-worktree Codex sandboxes. Delegated Codex runs
+  ignore user config and rules, project instructions, and workspace network;
+  child shells inherit no provider environment and cannot be login shells.
+  Run Claude in safe, non-persistent mode with an explicit file-tool allowlist
+  and customizations, Bash, agents, browser, slash-command, web, and MCP tools
+  disabled.
+- Bound plan, prompt, tree, timeout, manifest, event, and provider-output size.
+- Keep raw prompts out of manifests; write manifests and receipts as owner-only
+  files without following symlinks.
+- Validate manifest lifecycle replay, refuse accepted-state reuse across
+  invocations, and verify recovered worktree registration, repository identity,
+  detached state, and baseline.
+- Require an exact immutable commit mapping for every declared dependency and
+  verify that each commit is already materialized in the dependent baseline.
+- Remove arbitrary provider command overrides from the runtime request surface.
+- Pin every GitHub Action used by verification and Pages deployment to an
+  immutable commit SHA.
+
 ## [0.3.0] - 2026-08-29
 
 ### Added

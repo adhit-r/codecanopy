@@ -23,7 +23,7 @@ whitespace check.
 1. Update `plugins/code-canopy/.codex-plugin/plugin.json` and `CHANGELOG.md`.
 2. Confirm the README, product metadata, and Pages copy agree about shipped
    capability and evidence tier.
-3. Create an immutable tag such as `v0.3.0` only after the checks pass.
+3. Create an immutable tag such as `v0.4.0` only after the checks pass.
 4. Publish the tag and verify the GitHub Pages workflow before announcing the
    release.
 

@@ -1,7 +1,7 @@
 {
   "name": "code-canopy",
-  "version": "0.3.0",
-  "description": "Build and execute the smallest verified recursive Codex agent tree for an engineering goal.",
+  "version": "0.4.0",
+  "description": "Build the smallest verified, security-bounded engineering agent tree across Codex and Claude.",
   "author": {
     "name": "adhit-r",
     "url": "https://github.com/adhit-r"
@@ -9,12 +9,12 @@
   "homepage": "https://adhit-r.github.io/codecanopy/",
   "repository": "https://github.com/adhit-r/codecanopy",
   "license": "MIT",
-  "keywords": ["codex", "engineering", "multi-agent", "orchestration", "recursive-agents", "git"],
+  "keywords": ["codex", "claude", "engineering", "multi-agent", "orchestration", "recursive-agents", "security", "git"],
   "skills": "./skills/",
   "interface": {
     "displayName": "CodeCanopy",
-    "shortDescription": "Build the smallest verified Codex agent tree.",
-    "longDescription": "CodeCanopy recursively plans bounded specialist and worker nodes, runs only dependency-ready leaves, and keeps Git integration and final verification with one lead.",
+    "shortDescription": "Build the smallest security-bounded agent tree.",
+    "longDescription": "CodeCanopy plans bounded Codex and Claude specialist nodes, treats repository instructions and child output as untrusted, runs only dependency-ready leaves, and keeps Git integration and final verification with one lead.",
     "developerName": "adhit-r",
     "category": "Developer Tools",
     "capabilities": ["Interactive", "Write"],

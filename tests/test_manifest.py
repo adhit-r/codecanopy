@@ -1,9 +1,10 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from runtime.manifest import INVALIDATION_RULE, ManifestStore
+from runtime.manifest import INVALIDATION_RULE, MAX_MANIFEST_BYTES, ManifestError, ManifestStore
 
 
 class ManifestStoreTests(unittest.TestCase):
@@ -27,7 +28,10 @@ class ManifestStoreTests(unittest.TestCase):
         self.assertEqual([1, 2, 3], [row["seq"] for row in rows])
 
     def test_records_immutable_baseline_dependency_commits_and_checks(self):
-        self.store.record_node("run-1", "build", state="accepted")
+        self.store.record_node("run-1", "build", state="ready")
+        self.store.set_node_state("run-1", "build", "active")
+        self.store.set_node_state("run-1", "build", "returned")
+        self.store.set_node_state("run-1", "build", "accepted")
         self.store.record_node(
             "run-1",
             "interface",
@@ -43,8 +47,10 @@ class ManifestStoreTests(unittest.TestCase):
         self.assertEqual("passed", node["checks"][0]["result"])
 
     def test_recovery_never_claims_interrupted_active_nodes_completed(self):
-        self.store.record_node("run-1", "retry", state="active")
-        self.store.record_node("run-1", "needs-input", state="active")
+        self.store.record_node("run-1", "retry", state="ready")
+        self.store.set_node_state("run-1", "retry", "active")
+        self.store.record_node("run-1", "needs-input", state="ready")
+        self.store.set_node_state("run-1", "needs-input", "active")
 
         self.assertEqual(["retry", "needs-input"], self.store.recover_interrupted("run-1", blocked=["needs-input"]))
 
@@ -54,7 +60,10 @@ class ManifestStoreTests(unittest.TestCase):
         self.assertNotIn("accepted", {nodes["retry"]["state"], nodes["needs-input"]["state"]})
 
     def test_invalidation_stays_with_downstream_descendants(self):
-        self.store.record_node("run-1", "source", state="accepted")
+        self.store.record_node("run-1", "source", state="ready")
+        self.store.set_node_state("run-1", "source", "active")
+        self.store.set_node_state("run-1", "source", "returned")
+        self.store.set_node_state("run-1", "source", "accepted")
         self.store.record_node("run-1", "affected", parent_id="source", dependencies=["source"], state="ready")
         self.store.record_node("run-1", "nested", parent_id="affected", state="ready")
         self.store.record_node("run-1", "unrelated", state="ready")
@@ -68,7 +77,10 @@ class ManifestStoreTests(unittest.TestCase):
         self.assertEqual(INVALIDATION_RULE, nodes["nested"]["invalidations"][0]["rule"])
 
     def test_status_reports_critical_frontier_and_node_counts(self):
-        self.store.record_node("run-1", "contract", state="accepted")
+        self.store.record_node("run-1", "contract", state="ready")
+        self.store.set_node_state("run-1", "contract", "active")
+        self.store.set_node_state("run-1", "contract", "returned")
+        self.store.set_node_state("run-1", "contract", "accepted")
         self.store.record_node("run-1", "backend", dependencies=["contract"], state="ready")
         self.store.record_node("run-1", "ui", dependencies=["backend"], state="ready")
 
@@ -86,6 +98,32 @@ class ManifestStoreTests(unittest.TestCase):
 
         self.assertEqual("define", node["details"]["objective"])
         self.assertEqual("passed", node["checks"][0]["result"])
+
+    def test_illegal_or_unknown_manifest_events_fail_closed(self):
+        rows = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+        rows.append({"seq": 2, "kind": "node-state", "run_id": "run-1", "node_id": "missing", "state": "accepted"})
+        self.path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        with self.assertRaises(ManifestError):
+            ManifestStore(self.path).snapshot("run-1")
+
+    def test_manifest_rejects_symlink_without_touching_target(self):
+        target = Path(self.directory.name) / "target"
+        target.write_text("untouched", encoding="utf-8")
+        link = Path(self.directory.name) / "linked.jsonl"
+        link.symlink_to(target)
+        with self.assertRaises(ManifestError):
+            ManifestStore(link).create_run("unsafe")
+        self.assertEqual("untouched", target.read_text(encoding="utf-8"))
+
+    def test_oversized_manifest_is_rejected_before_parsing(self):
+        oversized = Path(self.directory.name) / "oversized.jsonl"
+        descriptor = os.open(oversized, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            os.ftruncate(descriptor, MAX_MANIFEST_BYTES + 1)
+        finally:
+            os.close(descriptor)
+        with self.assertRaisesRegex(ManifestError, "size limit"):
+            ManifestStore(oversized).snapshot("run-1")
 
 
 if __name__ == "__main__":
