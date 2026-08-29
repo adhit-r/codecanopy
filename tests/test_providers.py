@@ -58,7 +58,41 @@ class ProviderTests(unittest.TestCase):
             providers.append_proof_receipt(receipt, request, result)
             text = receipt.read_text(encoding="utf-8")
         self.assertNotIn("secret", text)
-        self.assertEqual(json.loads(text)["prompt_hash"], providers._hash("token=secret"))
+        receipt_data = json.loads(text)
+        self.assertEqual(receipt_data["prompt_hash"], providers._hash("token=secret"))
+        self.assertEqual(receipt_data["status"], "completed")
+        self.assertEqual(receipt_data["provider"], "codex")
+        self.assertEqual(receipt_data["requested_provider"], "codex")
+        self.assertFalse(receipt_data["fallback_used"])
+        self.assertEqual(receipt_data["exit_code"], 0)
+        self.assertEqual(receipt_data["timeout_seconds"], 300)
+
+    def test_receipt_uses_typed_result_fields_when_receipt_data_is_empty(self) -> None:
+        request = providers.ProviderRequest("do work", preferred_provider="claude", timeout_seconds=7)
+        result = providers.ProviderResult("failed", "claude", "claude", False, 2, "", "failed", {})
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "receipt.jsonl"
+            providers.append_proof_receipt(receipt, request, result)
+            row = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["provider"], "claude")
+        self.assertEqual(row["requested_provider"], "claude")
+        self.assertFalse(row["fallback_used"])
+        self.assertEqual(row["exit_code"], 2)
+        self.assertEqual(row["timeout_seconds"], 7)
+
+    def test_command_override_must_start_with_provider_token(self) -> None:
+        runner = Mock()
+        with self.assertRaises(ValueError):
+            providers.execute_provider(
+                providers.ProviderRequest(
+                    "do work",
+                    command_overrides={"codex": ("unexpected", "--json")},
+                ),
+                which=lambda _: "/bin/codex",
+                runner=runner,
+            )
+        runner.assert_not_called()
 
     def test_worktree_rejects_path_traversal_before_running_git(self) -> None:
         runner = Mock()
@@ -73,6 +107,18 @@ class ProviderTests(unittest.TestCase):
             target = providers.prepare_isolated_worktree(".", directory, "worker-a", runner=runner)
             self.assertEqual(target.parent, Path(directory).resolve())
         self.assertIn("--detach", runner.call_args.args[0])
+
+    def test_recovery_can_reuse_a_known_worktree(self) -> None:
+        runner = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "worker-a"
+            target.mkdir()
+            (target / ".git").write_text("gitdir: /tmp/worktree", encoding="utf-8")
+            reused = providers.prepare_isolated_worktree(
+                ".", directory, "worker-a", reuse_existing=True, runner=runner
+            )
+        self.assertEqual(target.resolve(), reused)
+        runner.assert_not_called()
 
 
 if __name__ == "__main__":

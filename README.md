@@ -85,7 +85,7 @@ The runtime accepts a small JSON plan. Each node names its provider and dependen
 }
 ```
 
-Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --accept-completed` only when a successful CLI exit is the explicit leaf check. Without that flag, results remain `returned` until the parent runs its acceptance check. Add `repo` and `worktree_root` to the plan for detached Git worktrees. A missing Claude CLI may use Codex only when the result records the fallback; failures and timeouts never switch providers.
+Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --accept-completed` only when a successful CLI exit is the explicit leaf check. Without that flag, results remain `returned` until the parent runs its acceptance check. If a node omits `baseline`, the runner resolves the current Git revision to a full commit before recording or dispatching it. Add `repo` and `worktree_root` to the plan for detached Git worktrees. A missing Claude CLI may use Codex only when the result records the fallback; failures and timeouts never switch providers.
 
 ## Roadmap
 

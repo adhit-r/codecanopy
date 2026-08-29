@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import re
+import subprocess
 from typing import Callable, Iterable, Mapping, Sequence
 
 from .manifest import ManifestError, ManifestStore
@@ -21,6 +22,7 @@ from .providers import (
 
 
 _NODE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+_IMMUTABLE_COMMIT = re.compile(r"^[0-9a-fA-F]{40,64}$")
 
 
 @dataclass(frozen=True)
@@ -87,17 +89,25 @@ def run_tree(
     recovered = store.recover_interrupted(run_id)
     snapshot = store.snapshot(run_id)
     known = set(snapshot["nodes"])
+    resolved_baselines = {
+        node.node_id: _resolve_baseline(node.baseline, repo)
+        for node in ordered
+    }
     for node in ordered:
+        baseline = resolved_baselines[node.node_id]
         if node.node_id in known:
+            _verify_saved_contract(snapshot["nodes"][node.node_id], node, baseline)
             continue
         store.record_node(
             run_id,
             node.node_id,
             state="ready",
             dependencies=node.depends_on,
-            baseline={"commit": node.baseline, "dependency_commits": dict(node.dependency_commits)},
+            baseline={"commit": baseline, "dependency_commits": dict(node.dependency_commits)},
+            prompt=node.prompt,
             provider=node.provider,
             timeout_seconds=node.timeout_seconds,
+            worktree_name=node.worktree_name,
         )
     receipts = Path(receipt_dir) if receipt_dir else Path(manifest_path).parent / "receipts"
     summaries: dict[str, dict[str, object]] = {}
@@ -112,24 +122,25 @@ def run_tree(
             continue
         dependency_states = {dep: snapshot["nodes"][dep]["state"] for dep in node.depends_on}
         if any(state != "accepted" for state in dependency_states.values()):
-            store.set_node_state(run_id, node.node_id, "blocked")
-            summaries[node.node_id] = {"status": "blocked", "reason": "dependency not accepted"}
+            summaries[node.node_id] = {"status": "ready", "reason": "dependency not accepted"}
             continue
 
         store.set_node_state(run_id, node.node_id, "active")
         cwd: Path | None = None
         if worktree_root is not None and repo is not None:
-            cwd = prepare(repo, worktree_root, node.worktree_name or node.node_id, revision=node.baseline)
-        result = execute(
-            ProviderRequest(
-                prompt=node.prompt,
-                preferred_provider=node.provider,
-                timeout_seconds=node.timeout_seconds,
-                cwd=cwd,
-            )
+            prepare_kwargs = {"revision": resolved_baselines[node.node_id]}
+            if node.node_id in recovered:
+                prepare_kwargs["reuse_existing"] = True
+            cwd = prepare(repo, worktree_root, node.worktree_name or node.node_id, **prepare_kwargs)
+        request = ProviderRequest(
+            prompt=node.prompt,
+            preferred_provider=node.provider,
+            timeout_seconds=node.timeout_seconds,
+            cwd=cwd,
         )
+        result = execute(request)
         receipt_path = receipts / f"{node.node_id}.jsonl"
-        append_proof_receipt(receipt_path, ProviderRequest(node.prompt, node.provider, node.timeout_seconds, cwd), result)
+        append_proof_receipt(receipt_path, request, result)
         store.record_check(run_id, node.node_id, "provider invocation", result.status, evidence=str(receipt_path))
         store.set_node_state(run_id, node.node_id, "returned")
         accepted = result.status == "completed" and accept is not None and accept(node, result)
@@ -146,6 +157,50 @@ def run_tree(
             "receipt": str(receipt_path),
         }
     return {"run_id": run_id, "recovered": recovered, "nodes": summaries}
+
+
+def _resolve_baseline(revision: str, repo: str | Path | None) -> str:
+    """Resolve symbolic revisions once so every manifest record is immutable."""
+    if _IMMUTABLE_COMMIT.fullmatch(revision):
+        return revision.lower()
+    location = Path(repo) if repo is not None else Path.cwd()
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(location.resolve()), "rev-parse", "--verify", f"{revision}^{{commit}}"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise ManifestError(f"could not resolve immutable baseline {revision!r} in {location}") from error
+    commit = completed.stdout.strip()
+    if not _IMMUTABLE_COMMIT.fullmatch(commit):
+        raise ManifestError(f"git returned a non-immutable baseline for {revision!r}")
+    return commit.lower()
+
+
+def _verify_saved_contract(current: Mapping[str, object], node: TreeNode, baseline: str) -> None:
+    """Reject a same-ID redispatch when its recorded execution contract changed."""
+    details = current.get("details", {})
+    if not isinstance(details, Mapping):
+        raise ManifestError(f"node {node.node_id} has an invalid saved contract")
+    expected = {
+        "prompt": node.prompt,
+        "provider": node.provider,
+        "timeout_seconds": node.timeout_seconds,
+        "worktree_name": node.worktree_name,
+    }
+    actual = {key: details.get(key) for key in expected}
+    actual["dependencies"] = current.get("dependencies")
+    expected["dependencies"] = list(node.depends_on)
+    actual["baseline"] = current.get("baseline")
+    expected["baseline"] = {
+        "commit": baseline,
+        "dependency_commits": dict(sorted(node.dependency_commits.items())),
+    }
+    if actual != expected:
+        raise ManifestError(f"saved contract for node {node.node_id} does not match the requested plan")
 
 
 def _topological(nodes: Sequence[TreeNode]) -> list[TreeNode]:

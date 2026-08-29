@@ -10,7 +10,7 @@ The smallest verified tree that reaches the goal.
 
 ## Runtime boundary
 
-v0.2 has local runtime support for per-node Codex and Claude CLI requests, provider results, proof receipts, isolated worktrees, and append-only recovery manifests. The core contract remains provider-neutral and does not pretend that model IDs, credentials, permissions, limits, or provider quality are portable or equivalent.
+v0.2 defines the provider-neutral canopy contract. v0.3 extends it with local support for per-node Codex and Claude CLI requests, provider results, proof receipts, isolated worktrees, and append-only recovery manifests. The core contract remains provider-neutral and does not pretend that model IDs, credentials, permissions, limits, or provider quality are portable or equivalent.
 
 The skill defines required behavior. Providers and their hosts remain responsible for documented model availability, concurrency, permissions, and approvals. CodeCanopy and the root explicitly create and verify worktree isolation where it is needed. Local runtime support is not automatic plugin execution, durable orchestration, staging, or production proof.
 
@@ -57,7 +57,7 @@ Each node explicitly selects `codex` or `claude`. A `ProviderRequest` carries th
 
 Only an unavailable Claude executable can fall back to Codex; the result and JSONL proof receipt must record the requested provider, actual provider, fallback flag, and reason. Failed or timed-out runs do not fall back. The helper does not share credentials or translate provider environments. Provider results and receipts prove local invocation only, not quality, portability, staging, production, or goal acceptance.
 
-Writing nodes use a detached Git worktree beneath a caller-owned root and the immutable baseline; escaping names are rejected. The helper never merges, commits, pushes, or cleans up worktrees.
+Writing nodes use a detached Git worktree beneath a caller-owned root and the immutable baseline; escaping names are rejected. A manifest-confirmed interrupted retry may reuse its existing Git worktree target, while unrelated collisions fail. The helper never merges, commits, pushes, or cleans up worktrees.
 
 `ManifestStore(path)` appends canonical JSONL events with strictly increasing sequence numbers. It records run/node state, immutable baselines, dependencies, checks, recovery, and downstream invalidation. Interrupted nodes recover to `ready` or caller-chosen `blocked`, never success. Before redispatch, the parent must verify the saved baseline, dependencies, worktree, provider result, and evidence; stale records invalidate only dependent descendants. The manifest is local recovery evidence, not a durable scheduler, secret store, distributed lock, or production audit trail.
 

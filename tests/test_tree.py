@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from runtime.manifest import ManifestError, ManifestStore
 from runtime.providers import ProviderResult
 from runtime.tree import TreeNode, run_tree
 
@@ -38,7 +39,7 @@ class MixedTreeTests(unittest.TestCase):
             self.assertEqual("run-created", first_event["kind"])
             self.assertTrue((root / "receipts" / "ui.jsonl").exists())
 
-    def test_failed_parent_blocks_dependent_without_running_it(self):
+    def test_failed_parent_leaves_dependent_ready_without_running_it(self):
         calls = []
 
         def fake_execute(request):
@@ -53,7 +54,41 @@ class MixedTreeTests(unittest.TestCase):
                 execute=fake_execute,
             )
         self.assertEqual(["codex"], calls)
-        self.assertEqual("blocked", result["nodes"]["ui"]["status"])
+        self.assertEqual("ready", result["nodes"]["ui"]["status"])
+
+    def test_changed_saved_contract_is_rejected_before_redispatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_tree(
+                [TreeNode("contract", "define", "codex")],
+                manifest_path=root / "run.jsonl",
+                run_id="contract-change",
+                execute=lambda request: ProviderResult(
+                    "completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {}
+                ),
+                accept=lambda _node, _result: True,
+            )
+            with self.assertRaises(ManifestError):
+                run_tree(
+                    [TreeNode("contract", "changed", "codex")],
+                    manifest_path=root / "run.jsonl",
+                    run_id="contract-change",
+                    execute=lambda _request: self.fail("changed contract must not execute"),
+                )
+
+    def test_default_baseline_is_materialized_as_a_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_tree(
+                [TreeNode("contract", "define", "codex")],
+                manifest_path=root / "run.jsonl",
+                run_id="baseline",
+                execute=lambda request: ProviderResult(
+                    "completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {}
+                ),
+            )
+            baseline = ManifestStore(root / "run.jsonl").snapshot("baseline")["nodes"]["contract"]["baseline"]["commit"]
+            self.assertRegex(baseline, r"^[0-9a-f]{40,64}$")
 
     def test_successful_provider_result_stays_returned_without_acceptance(self):
         def fake_execute(request):

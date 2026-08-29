@@ -112,6 +112,8 @@ def execute_provider(
     command = tuple(request.command_overrides.get(selected, DEFAULT_COMMANDS[selected]))
     if not command:
         raise ValueError(f"empty command for {selected}")
+    if command[0] != selected:
+        raise ValueError(f"command override for {selected} must start with {selected!r}")
     command = (executable, *command[1:], request.prompt)
     try:
         completed = runner(
@@ -161,8 +163,13 @@ def append_proof_receipt(path: str | Path, request: ProviderRequest, result: Pro
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     receipt = {
-        key: result.receipt_data.get(key)
-        for key in ("status", "provider", "requested_provider", "fallback_used", "fallback_reason", "exit_code", "timeout_seconds")
+        "status": result.status,
+        "provider": result.provider,
+        "requested_provider": result.requested_provider,
+        "fallback_used": result.fallback_used,
+        "fallback_reason": result.receipt_data.get("fallback_reason"),
+        "exit_code": result.exit_code,
+        "timeout_seconds": request.timeout_seconds,
     }
     receipt.update(prompt_hash=_hash(request.prompt), output_hash=_hash(result.output))
     with path.open("a", encoding="utf-8") as handle:
@@ -175,6 +182,7 @@ def prepare_isolated_worktree(
     name: str,
     *,
     revision: str = "HEAD",
+    reuse_existing: bool = False,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Path:
     """Create a detached git worktree below a caller-owned root, never outside it."""
@@ -188,6 +196,8 @@ def prepare_isolated_worktree(
     except ValueError as error:
         raise ValueError("worktree path escapes worktree root") from error
     if target.exists():
+        if reuse_existing and target.is_dir() and (target / ".git").is_file():
+            return target
         raise FileExistsError(target)
     root.mkdir(parents=True, exist_ok=True)
     runner(
