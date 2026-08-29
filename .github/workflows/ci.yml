@@ -29,12 +29,12 @@ jobs:
         run: python3 benchmarks/model_routing.py
       - name: Validate JSON metadata and Pages surface
         run: >-
-          python3 -c "import json; from pathlib import Path;
+          python3 -c "import json, sys; from pathlib import Path;
           [json.loads(Path(path).read_text(encoding='utf-8')) for path in
           ('plugins/code-canopy/.codex-plugin/plugin.json', '.agents/plugins/marketplace.json')];
           html=Path('docs/index.html').read_text(encoding='utf-8');
           required=('CodeCanopy', 'application/ld+json', 'https://adhit-r.github.io/codecanopy/');
           missing=[value for value in required if value not in html];
-          raise SystemExit('missing Pages markers: ' + ', '.join(missing)) if missing else None"
+          sys.exit('missing Pages markers: ' + ', '.join(missing)) if missing else None"
       - name: Check patch whitespace
         run: git diff --check
