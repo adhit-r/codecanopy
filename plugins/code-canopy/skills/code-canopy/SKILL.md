@@ -21,8 +21,8 @@ Record:
 - Evidence tier: static, unit, integration, staging, or production.
 - Repository, branch, baseline commit, dirty files, and existing worktrees.
 - Git mode: `read-only`, `edit`, `local-commit`, or `remote`. In `edit`, only the root writes; parallel writers require commit mode. Infer no more authority than the request grants.
-- Node contract: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read and write scope, produced and consumed artifacts, dependencies, acceptance check, evidence tier, normalized complexity and size scores, routing score, selected model tier, remaining budget, delegation permission, stop condition, and Git mode.
-- Effective limits and model preferences. Start with the bundled [defaults](assets/codecanopy.toml); host/admin policy and an explicit current user instruction take precedence over an optional project-root `.codecanopy.toml`, which takes precedence over built-in defaults. Unknown or invalid project values are ignored with a visible warning.
+- Node contract: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read and write scope, produced and consumed artifacts, dependencies, acceptance check, evidence tier, normalized complexity and size scores, routing score, selected model tier, provider, timeout, remaining budget, delegation permission, stop condition, and Git mode.
+- Effective limits, provider choice, timeout, and model preferences. Start with the bundled [defaults](assets/codecanopy.toml); host/admin policy and an explicit current user instruction take precedence over an optional project-root `.codecanopy.toml`, which takes precedence over built-in defaults. Unknown or invalid project values are ignored with a visible warning.
 
 Use a platform goal tracker only when the user explicitly requests a tracked goal.
 
@@ -48,10 +48,11 @@ Default limits: root depth `0`; maximum depth `3`; three children per node; nine
 3. For every planned node, estimate normalized `complexity_score` and `size_score` from observable scope, decisions, dependencies, artifacts, and checks. Compute the configured weighted routing score and select the smallest capable model tier automatically; do not ask the user to choose a model during planning. Root, integration, and security decisions route to `lead`; review work routes to `reviewer`; missing or uncertain scores route to at least `expert`.
 4. For a non-atomic node, split only into independently usable outcome contracts. Delegate only when delegation is explicitly allowed and there is remaining depth, remaining total-node capacity, disjoint scope, explicit acceptance, and useful parallel or specialist value. Collapse the split when coordination costs more than that value.
 5. Record the ownership tree and artifact DAG. Reserve parent integration capacity. Before dispatching a source-level leaf with accepted dependencies, the root integrates those commits in DAG order into a fresh immutable baseline and records it in the node packet. Then dispatch the deepest dependency-ready critical-path leaves within effective limits.
-6. Accept results bottom-up: a parent verifies required child artifacts, runs its own integration check, and emits one normalized result upward.
-7. On changed contracts or failed dependent evidence, replan only the affected subtree. Stop only when root acceptance passes.
+6. Before a local provider run, record the node's provider and timeout, check that its CLI is available, create its isolated worktree when it writes, and retain the provider result and proof receipt. A Claude request may fall back to Codex only when Claude is unavailable; the result and receipt must flag that fallback. Never share credentials or silently change providers.
+7. Accept results bottom-up: a parent verifies required child artifacts, runs its own integration check, and emits one normalized result upward.
+8. On changed contracts or failed dependent evidence, replan only the affected subtree. Stop only when root acceptance passes.
 
-Use the [runtime contract](references/runtime-contract.md) for states, readiness, collision, retry, invalidation, and normalized results. Use the [Codex adapter](references/codex-adapter.md) for current role-model mappings and documented host boundaries.
+Use the [runtime contract](references/runtime-contract.md) for states, provider results, receipts, resume/invalidation, collision, retry, and normalized results. Use the [Codex adapter](references/codex-adapter.md) and [Claude adapter](references/claude-adapter.md) for current provider boundaries.
 
 Requested headcount is not work. Never create agents to meet a number, restate context, or write the final report.
 

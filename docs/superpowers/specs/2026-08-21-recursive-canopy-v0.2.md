@@ -10,9 +10,9 @@ The smallest verified tree that reaches the goal.
 
 ## Runtime boundary
 
-v0.2 supports Codex only. The core contract uses provider-neutral role and result terms so a later Claude adapter can reuse semantics without pretending manifests, model IDs, permissions, or limits are portable.
+v0.2 defines the provider-neutral canopy contract. v0.3 extends it with local support for per-node Codex and Claude CLI requests, provider results, proof receipts, isolated worktrees, and append-only recovery manifests. The core contract remains provider-neutral and does not pretend that model IDs, credentials, permissions, limits, or provider quality are portable or equivalent.
 
-The skill defines required behavior. Codex and its sandbox remain responsible for documented model availability, concurrency, permissions, and approvals. CodeCanopy and the root explicitly create and verify worktree isolation where it is needed.
+The skill defines required behavior. Providers and their hosts remain responsible for documented model availability, concurrency, permissions, and approvals. CodeCanopy and the root explicitly create and verify worktree isolation where it is needed. Local runtime support is not automatic plugin execution, durable orchestration, staging, or production proof.
 
 ## Planning structures
 
@@ -47,9 +47,19 @@ Depth and total-node capacity apply when a node proposes children. A leaf at the
 
 ## Node contract
 
-Each node records: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, normalized complexity score, normalized size score, weighted routing score, selected model tier, remaining budget, delegation permission, stop condition, and Git mode.
+Each node records: ID, parent, role, objective, deliverable, non-goals, immutable baseline commit plus materialized dependency commits, read scope, write scope, produced artifacts, consumed artifacts, dependencies, acceptance check, evidence tier, normalized complexity score, normalized size score, weighted routing score, selected model tier, provider, timeout, remaining budget, delegation permission, stop condition, and Git mode.
 
 Workers return: status, result, files, commit or diff, checks, evidence, and exact blocker.
+
+## Local provider and recovery support
+
+Each node explicitly selects `codex` or `claude`. A `ProviderRequest` carries the prompt, preferred provider, timeout, working directory, and optional command override. The local adapter checks the chosen executable, invokes Codex with `codex exec --json` or Claude with `claude --print --output-format json`, and returns `completed`, `failed`, `timed_out`, or `unavailable` with the requested/actual provider, exit code, output, error, and fallback flag. Prompts are arguments, not shell input.
+
+Only an unavailable Claude executable can fall back to Codex; the result and JSONL proof receipt must record the requested provider, actual provider, fallback flag, and reason. Failed or timed-out runs do not fall back. The helper does not share credentials or translate provider environments. Provider results and receipts prove local invocation only, not quality, portability, staging, production, or goal acceptance.
+
+Writing nodes use a detached Git worktree beneath a caller-owned root and the immutable baseline; escaping names are rejected. A manifest-confirmed interrupted retry may reuse its existing Git worktree target, while unrelated collisions fail. The helper never merges, commits, pushes, or cleans up worktrees.
+
+`ManifestStore(path)` appends canonical JSONL events with strictly increasing sequence numbers. It records run/node state, immutable baselines, dependencies, checks, recovery, and downstream invalidation. Interrupted nodes recover to `ready` or caller-chosen `blocked`, never success. Before redispatch, the parent must verify the saved baseline, dependencies, worktree, provider result, and evidence; stale records invalidate only dependent descendants. The manifest is local recovery evidence, not a durable scheduler, secret store, distributed lock, or production audit trail.
 
 ## Default limits
 
@@ -79,7 +89,7 @@ During planning, the root estimates each node's normalized complexity and size f
 
 ## Configuration
 
-An optional project-root `.codecanopy.toml` may lower or tune planning limits and preferred model mappings. Unknown keys or invalid values are ignored with a visible warning; built-in safe defaults remain active. Precedence is host/admin policy, explicit current user instruction, project configuration, then built-in defaults.
+An optional project-root `.codecanopy.toml` may lower or tune planning limits and preferred model mappings. It intentionally does not configure provider credentials, provider commands, or per-node timeout; those remain explicit `ProviderRequest` data. Unknown keys or invalid values are ignored with a visible warning; built-in safe defaults remain active. Precedence is host/admin policy, explicit current user instruction, project configuration, then built-in defaults.
 
 The public v0.2 schema uses `max_parallel`, `max_replans`, `root_reserve_percent`, and `reasoning_effort`. Documentation and the bundled asset must use these exact names.
 
@@ -102,7 +112,7 @@ Configuration cannot grant Git, network, destructive, credential, production, or
 - No instruction says child workers can never delegate.
 - The skill explains the ownership-tree and dependency-DAG distinction.
 - Recursive planning, Leaf Test, bottom-up integration, subtree replanning, and stopping rules are discoverable from `SKILL.md`.
-- Configuration and Codex mapping are documented without overstating enforcement.
+- Provider-neutral request/result, explicit Codex fallback, worktree, receipt, manifest recovery, and invalidation boundaries are documented without overstating enforcement.
 - Existing Git safety and evidence rules remain intact.
 - Plugin and skill validators pass.
 - An independent forward test produces a nested plan for a genuinely recursive request and a single-agent plan for an atomic request.

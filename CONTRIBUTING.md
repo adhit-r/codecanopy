@@ -11,7 +11,7 @@ CodeCanopy prefers the smallest verified contribution that closes one issue.
 ## Make the change
 
 - Preserve unrelated work and never commit secrets or private repository data.
-- Keep Codex-only behavior separate from Claude and mixed-provider roadmap work.
+- Keep provider-neutral contracts separate from provider-specific CLI behavior; every fallback must remain explicit and receipt-backed.
 - Use one writer per path. Shared manifests and integration files stay with the integrating owner.
 - Add the smallest runnable check for non-trivial behavior.
 - Keep documentation truthful about local, staging, and production evidence.
@@ -23,6 +23,7 @@ Run the checks that cover your change. For plugin contract or metadata changes, 
 ```bash
 python3 /Users/adhi/.codex/skills/.system/skill-creator/scripts/quick_validate.py plugins/code-canopy/skills/code-canopy
 python3 /Users/adhi/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/code-canopy
+python3 -m unittest discover -s tests -v
 python3 benchmarks/model_routing.py
 git diff --check
 ```

@@ -1,16 +1,26 @@
 # CodeCanopy runtime contract
 
-This contract defines CodeCanopy's required planning behavior. Codex and its host environment enforce documented model availability, concurrency, sandbox policy, permissions, and approvals. CodeCanopy and the root explicitly create and verify worktree isolation where it is needed. The contract cannot expand user authority.
+This contract defines CodeCanopy's provider-neutral planning behavior and the small local runtime boundary for Codex and Claude CLIs. Providers and hosts enforce their own model availability, concurrency, sandbox policy, permissions, and approvals. The contract cannot expand user authority.
 
 ## Node record
 
-Record every node with its ID, parent, role, objective, deliverable, non-goals, baseline, read scope, write scope, produced artifacts, consumed artifacts, dependency IDs, acceptance check, evidence tier, normalized complexity score, normalized size score, weighted routing score, selected model tier, remaining budget, delegation permission, stop condition, and Git mode. The baseline records one immutable commit plus any accepted dependency commits materialized into it. A child inherits only the parent authority and may narrow, never expand, its scope or budget.
+Record every node with its ID, parent, role, objective, deliverable, non-goals, baseline, read scope, write scope, produced artifacts, consumed artifacts, dependency IDs, acceptance check, evidence tier, normalized complexity score, normalized size score, weighted routing score, selected model tier, provider, timeout, remaining budget, delegation permission, stop condition, and Git mode. The baseline records one immutable commit plus any accepted dependency commits materialized into it. A child inherits only the parent authority and may narrow, never expand, its scope or budget.
 
 Use an ownership tree for parent authority, scope, budget, questions, and integration. Use a separate artifact dependency DAG for scheduling. Only leaves with accepted dependencies may execute.
 
+## Provider request, result, and isolation
+
+Provider choice is per node: `codex` or `claude`. It is independent of the capability role and must be recorded before dispatch. A local request contains the prompt, preferred provider, timeout, working directory, and optional command override. The adapter first checks the selected CLI. Its supported headless commands are `codex exec --json` and `claude --print --output-format json`; it passes the prompt as one argument, never through a shell.
+
+The local result is `completed`, `failed`, `timed_out`, or `unavailable`, with the requested and actual provider, `fallback_used`, exit code, output, and error. A Claude request whose executable is unavailable may use Codex only if Codex is available; that is the sole fallback and the result must explicitly record it. A run failure or timeout never triggers fallback. No provider change is silent. Credentials are never copied, stored in the request/receipt, or passed from one provider to another; each CLI uses its own local authentication.
+
+Writing nodes use a fresh detached Git worktree below a caller-owned worktree root and the recorded immutable baseline. On a manifest-confirmed interrupted retry, the adapter may reuse the existing target only when it is still a Git worktree marker; unrelated collisions remain errors. Reject absolute or escaping worktree names. The adapter does not merge or clean up a worktree, and a provider result does not bypass the normal integration barrier.
+
+Append a proof receipt as JSONL for every attempt. Receipts contain provider/result metadata plus SHA-256 hashes of the prompt and output, not their raw contents. They are execution evidence only; a successful CLI exit, receipt, or local check is not proof of provider quality, staging, production, or task acceptance. The optional local runner marks a node `accepted` only when its caller supplies an explicit leaf acceptance check; otherwise it remains `returned`.
+
 ## Lifecycle and readiness
 
-`draft -> planned -> ready -> active -> returned -> accepted` is the successful path. A node may move to `blocked` when required evidence, authorization, or a clean scope is unavailable. A changed contract or failed prerequisite moves affected descendants to `invalidated`; they return to `draft` only through an allowed subtree replan.
+`draft -> planned -> ready -> active -> returned -> accepted` is the successful path. A node may move to `blocked` when required evidence, authorization, a provider capability check, or a clean scope is unavailable. A timeout returns a `timed_out` provider result and remains unaccepted. A changed contract, failed prerequisite, changed baseline, missing receipt, or failed acceptance check moves affected descendants to `invalidated`; they return to `draft` only through an allowed subtree replan.
 
 A planned leaf is ready when all consumed artifacts and dependency nodes are accepted, its immutable baseline contains the exact accepted source dependencies it will test against, its assigned paths do not overlap an active writer, its acceptance check is explicit, and its execution fits the remaining budget. Depth and total-node capacity gate creating children; active-child capacity gates dispatch, not readiness. Dispatch the deepest ready critical-path leaves first within the active-child limit.
 
@@ -39,6 +49,10 @@ One writer owns a path at a time. Shared files, lockfiles, generated schemas, an
 
 Retry a failed node once only when new evidence justifies it. Repeated, semantic, or authorization failures return to the parent as `blocked` rather than spawning more work. When a contract, artifact, or acceptance condition changes, invalidate only descendants that depend on it; accepted unrelated nodes remain valid. Replan an affected subtree at most once, within remaining effective limits.
 
+## Local manifests and recovery
+
+`ManifestStore(path)` writes caller-selected JSONL append-only events with monotonically increasing sequence numbers. A run records its state; each node records its parent, dependencies, immutable baseline, state, checks, and invalidations. Recovery records interrupted nodes as `ready` or caller-selected `blocked`, never as successful. Before redispatch, the parent must verify that the recorded baseline, dependency acceptance, provider result, worktree, and evidence still match the current node contract. Otherwise invalidate only downstream ownership/dependency descendants, create a new immutable baseline where needed, and replan within the existing retry and subtree limits. A manifest is local recovery evidence, not a durable scheduler, secret store, distributed lock, or production audit trail.
+
 ## Normalized result
 
 Every completed or blocked node returns:
@@ -53,4 +67,4 @@ evidence: <path:line or artifact>
 blocker: <exact obstacle or none>
 ```
 
-`done` is not parent acceptance. The parent accepts only after its integration barrier passes. Local checks remain local evidence and never imply staging or production proof.
+Include the provider result and proof-receipt path in `evidence` when a local provider ran. `done` is not parent acceptance. The parent accepts only after its integration barrier passes. Local checks remain local evidence and never imply staging or production proof.

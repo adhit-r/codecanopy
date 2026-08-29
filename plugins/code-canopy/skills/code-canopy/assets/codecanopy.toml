@@ -1,5 +1,8 @@
 schema_version = 1
-runtime = "codex"
+# Local runtime support accepts per-node ProviderRequest values for `codex` or
+# `claude`; this planning asset intentionally stores neither CLI credentials nor
+# provider command options.
+runtime = "local"
 
 [tree]
 max_depth = 3
