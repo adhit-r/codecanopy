@@ -12,5 +12,5 @@ CodeCanopy is a free, open-source Codex plugin for turning an engineering goal i
 
 Primary page: https://adhit-r.github.io/codecanopy/
 Repository and installation: https://github.com/adhit-r/codecanopy#install
-Current v0.2 work: https://github.com/adhit-r/codecanopy/issues/1
+Current v0.3 work: https://github.com/adhit-r/codecanopy/issues/1
 Local support issues: Claude adapter https://github.com/adhit-r/codecanopy/issues/4; mixed-provider CLI https://github.com/adhit-r/codecanopy/issues/5; resumable manifests https://github.com/adhit-r/codecanopy/issues/6.

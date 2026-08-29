@@ -87,6 +87,7 @@ def run_tree(
         snapshot = store.snapshot(run_id)
 
     recovered = store.recover_interrupted(run_id)
+    store.set_run_state(run_id, "active")
     snapshot = store.snapshot(run_id)
     known = set(snapshot["nodes"])
     resolved_baselines = {
@@ -156,7 +157,16 @@ def run_tree(
             "fallback_used": result.fallback_used,
             "receipt": str(receipt_path),
         }
-    return {"run_id": run_id, "recovered": recovered, "nodes": summaries}
+    final = store.snapshot(run_id)
+    states = {node["state"] for node in final["nodes"].values()}
+    if states and states <= {"accepted"}:
+        run_state = "completed"
+    elif "blocked" in states or "invalidated" in states:
+        run_state = "blocked"
+    else:
+        run_state = "planned"
+    store.set_run_state(run_id, run_state)
+    return {"run_id": run_id, "recovered": recovered, "nodes": summaries, "state": run_state}
 
 
 def _resolve_baseline(revision: str, repo: str | Path | None) -> str:
@@ -235,10 +245,23 @@ def _load_plan(path: Path) -> tuple[str, list[TreeNode], dict[str, object]]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a bounded CodeCanopy provider tree")
-    parser.add_argument("plan", type=Path, help="JSON plan containing run_id and nodes")
+    parser.add_argument("plan", type=Path, nargs="?", help="JSON plan containing run_id and nodes")
     parser.add_argument("--manifest", type=Path, required=True, help="append-only JSONL manifest path")
+    parser.add_argument("--run-id", help="run identifier for --status or --inspect")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--status", action="store_true", help="show run state and dependency-ready frontier")
+    action.add_argument("--inspect", metavar="NODE_ID", help="show one recorded node contract and evidence")
     parser.add_argument("--accept-completed", action="store_true", help="use successful CLI exit as this run's explicit leaf check")
     args = parser.parse_args(argv)
+    if args.status or args.inspect:
+        if args.plan is not None or not args.run_id:
+            parser.error("--status/--inspect require --manifest and --run-id without a plan")
+        store = ManifestStore(args.manifest)
+        payload = store.status(args.run_id) if args.status else store.inspect_node(args.run_id, args.inspect)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    if args.plan is None:
+        parser.error("a plan is required unless --status or --inspect is used")
     run_id, nodes, options = _load_plan(args.plan)
     accept = (lambda _node, result: result.status == "completed") if args.accept_completed else None
     print(json.dumps(run_tree(nodes, manifest_path=args.manifest, run_id=run_id, accept=accept, **options), indent=2, sort_keys=True))

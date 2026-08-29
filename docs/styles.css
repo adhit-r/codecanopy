@@ -241,6 +241,12 @@ details p { max-width: 68ch; margin: 0; padding: 0 0 17px; color: var(--muted); 
   .safety-panel { grid-column: 1 / -1; border-top: 1px solid var(--rule); border-left: 0 !important; }
 }
 
+@media (max-width: 900px) and (min-width: 761px) {
+  .hero { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+  .hero-copy { max-width: 640px; }
+  .route-rack { margin-top: 20px; }
+}
+
 @media (max-width: 760px) {
   .site-header { padding-top: 10px; }
   .descriptor { order: 2; width: 100%; white-space: normal; }

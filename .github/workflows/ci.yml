@@ -1,0 +1,40 @@
+name: Verify CodeCanopy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Run routing policy benchmark
+        run: python3 benchmarks/model_routing.py
+      - name: Validate JSON metadata and Pages surface
+        run: >-
+          python3 -c "import json; from pathlib import Path;
+          [json.loads(Path(path).read_text(encoding='utf-8')) for path in
+          ('plugins/code-canopy/.codex-plugin/plugin.json', '.agents/plugins/marketplace.json')];
+          html=Path('docs/index.html').read_text(encoding='utf-8');
+          required=('CodeCanopy', 'application/ld+json', 'https://adhit-r.github.io/codecanopy/');
+          missing=[value for value in required if value not in html];
+          raise SystemExit('missing Pages markers: ' + ', '.join(missing)) if missing else None"
+      - name: Check patch whitespace
+        run: git diff --check

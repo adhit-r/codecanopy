@@ -67,6 +67,26 @@ class ManifestStoreTests(unittest.TestCase):
         self.assertEqual("ready", nodes["unrelated"]["state"])
         self.assertEqual(INVALIDATION_RULE, nodes["nested"]["invalidations"][0]["rule"])
 
+    def test_status_reports_critical_frontier_and_node_counts(self):
+        self.store.record_node("run-1", "contract", state="accepted")
+        self.store.record_node("run-1", "backend", dependencies=["contract"], state="ready")
+        self.store.record_node("run-1", "ui", dependencies=["backend"], state="ready")
+
+        status = self.store.status("run-1")
+
+        self.assertEqual("planned", status["state"])
+        self.assertEqual(["backend"], status["critical_frontier"])
+        self.assertEqual({"accepted": 1, "ready": 2}, status["node_counts"])
+
+    def test_inspect_node_returns_recorded_evidence(self):
+        self.store.record_node("run-1", "contract", state="ready", objective="define")
+        self.store.record_check("run-1", "contract", "unit", "passed")
+
+        node = self.store.inspect_node("run-1", "contract")
+
+        self.assertEqual("define", node["details"]["objective"])
+        self.assertEqual("passed", node["checks"][0]["result"])
+
 
 if __name__ == "__main__":
     unittest.main()

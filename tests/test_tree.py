@@ -1,11 +1,13 @@
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from runtime.manifest import ManifestError, ManifestStore
 from runtime.providers import ProviderResult
-from runtime.tree import TreeNode, run_tree
+from runtime.tree import TreeNode, main, run_tree
 
 
 class MixedTreeTests(unittest.TestCase):
@@ -36,6 +38,7 @@ class MixedTreeTests(unittest.TestCase):
             self.assertEqual(["codex", "codex", "claude"], [provider for provider, _ in calls])
             self.assertEqual({"contract", "backend", "ui"}, set(result["nodes"]))
             self.assertEqual("accepted", result["nodes"]["ui"]["status"])
+            self.assertEqual("completed", result["state"])
             self.assertEqual("run-created", first_event["kind"])
             self.assertTrue((root / "receipts" / "ui.jsonl").exists())
 
@@ -102,6 +105,30 @@ class MixedTreeTests(unittest.TestCase):
                 execute=fake_execute,
             )
         self.assertEqual("returned", result["nodes"]["contract"]["status"])
+        self.assertEqual("planned", result["state"])
+
+    def test_cli_status_and_inspect_read_manifest_without_running_provider(self):
+        def fake_execute(request):
+            return ProviderResult("completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {})
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "run.jsonl"
+            run_tree(
+                [TreeNode("contract", "define", "codex")],
+                manifest_path=manifest,
+                run_id="cli",
+                execute=fake_execute,
+                accept=lambda _node, _result: True,
+            )
+            status_output = io.StringIO()
+            with redirect_stdout(status_output):
+                self.assertEqual(0, main(["--status", "--manifest", str(manifest), "--run-id", "cli"]))
+            inspect_output = io.StringIO()
+            with redirect_stdout(inspect_output):
+                self.assertEqual(0, main(["--inspect", "contract", "--manifest", str(manifest), "--run-id", "cli"]))
+
+        self.assertEqual("completed", json.loads(status_output.getvalue())["state"])
+        self.assertEqual("contract", json.loads(inspect_output.getvalue())["node_id"])
 
 
 if __name__ == "__main__":

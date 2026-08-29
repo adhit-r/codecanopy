@@ -12,6 +12,9 @@ codex plugin add code-canopy@codecanopy
 ```
 
 Restart the Codex or ChatGPT desktop app after installation, then start a new task.
+The marketplace package installs the skill. The optional Python runtime commands
+below currently require a repository checkout; packaging that runtime is the
+next release gate.
 
 ## Use
 
@@ -87,9 +90,23 @@ The runtime accepts a small JSON plan. Each node names its provider and dependen
 
 Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --accept-completed` only when a successful CLI exit is the explicit leaf check. Without that flag, results remain `returned` until the parent runs its acceptance check. If a node omits `baseline`, the runner resolves the current Git revision to a full commit before recording or dispatching it. Add `repo` and `worktree_root` to the plan for detached Git worktrees. A missing Claude CLI may use Codex only when the result records the fallback; failures and timeouts never switch providers.
 
+Inspect an existing local run without dispatching a provider:
+
+```bash
+python3 -m runtime.tree --status --manifest .codecanopy/run.jsonl --run-id mixed-example
+python3 -m runtime.tree --inspect ui --manifest .codecanopy/run.jsonl --run-id mixed-example
+```
+
+`--status` reports node counts and the dependency-ready critical frontier;
+`--inspect` prints the recorded contract, checks, and invalidations for one
+node. These are local manifest views, not proof that a goal is accepted.
+
 ## Roadmap
 
-- Current: Recursive Canopy v0.2 core plus v0.3 local runtime support, [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), and implementation tracking in [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
+- Current release: v0.3.0 adds local mixed-provider execution, append-only recovery manifests, proof receipts, and the weighted routing benchmark. See [CHANGELOG.md](CHANGELOG.md).
+- Next: package the local runtime with the marketplace artifact, add a pinned release workflow, and verify the installed plugin from a clean archive.
+- In progress: run observability now includes `--status` and `--inspect` for reconstructing the critical frontier from a manifest.
+- Tracked work: [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), [current work](https://github.com/adhit-r/codecanopy/issues/1), and the provider/recovery issues [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
 - Evidence-gated: real-provider quality, production behavior, and durable multi-process recovery remain unclaimed until separately observed.
 
 A deterministic scheduler remains deferred until real runs show that the local contract cannot honor limits or recovery requirements.

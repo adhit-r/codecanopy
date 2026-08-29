@@ -28,10 +28,15 @@ jobs:
         uses: actions/checkout@v6
       - name: Configure Pages
         uses: actions/configure-pages@v5
+      - name: Validate and stage public site
+        run: |
+          python3 -c "import json; from pathlib import Path; json.loads(Path('docs/index.html').read_text(encoding='utf-8').split('<script type=\"application/ld+json\">', 1)[1].split('</script>', 1)[0]); assert 'https://adhit-r.github.io/codecanopy/' in Path('docs/index.html').read_text(encoding='utf-8')"
+          mkdir -p _site
+          cp docs/index.html docs/styles.css docs/llms.txt docs/robots.txt docs/sitemap.xml docs/favicon.svg docs/codecanopy-social.png _site/
       - name: Upload static site
         uses: actions/upload-pages-artifact@v4
         with:
-          path: ./docs
+          path: ./_site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

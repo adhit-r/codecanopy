@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - retained for importability elsewhere.
 
 
 NODE_STATES = frozenset({"draft", "planned", "ready", "active", "returned", "accepted", "blocked", "invalidated"})
+RUN_STATES = frozenset({"planned", "active", "blocked", "completed"})
 INVALIDATION_RULE = "parent-or-dependency-descendant"
 
 
@@ -29,15 +30,49 @@ class ManifestStore:
         self.path = Path(path)
 
     def create_run(self, run_id: str, *, state: str = "planned", **details: Any) -> dict[str, Any]:
-        self._require_state(state)
+        self._require_run_state(state)
         if run_id in self._runs():
             raise ManifestError(f"run already exists: {run_id}")
         return self._append({"kind": "run-created", "run_id": run_id, "state": state, "details": details})
 
     def set_run_state(self, run_id: str, state: str) -> dict[str, Any]:
         self._require_run(run_id)
-        self._require_state(state)
+        self._require_run_state(state)
         return self._append({"kind": "run-state", "run_id": run_id, "state": state})
+
+    def status(self, run_id: str) -> dict[str, Any]:
+        """Return a compact, human-readable run summary and critical frontier."""
+        snapshot = self.snapshot(run_id)
+        nodes = snapshot["nodes"]
+        counts: dict[str, int] = {}
+        frontier: list[str] = []
+        for node_id, node in nodes.items():
+            state = node["state"]
+            counts[state] = counts.get(state, 0) + 1
+            if state == "ready" and all(nodes[dependency]["state"] == "accepted" for dependency in node["dependencies"]):
+                frontier.append(node_id)
+        return {
+            "run_id": run_id,
+            "state": snapshot["state"],
+            "node_counts": dict(sorted(counts.items())),
+            "critical_frontier": sorted(frontier),
+            "nodes": {
+                node_id: {
+                    "state": node["state"],
+                    "dependencies": list(node["dependencies"]),
+                    "checks": len(node["checks"]),
+                }
+                for node_id, node in sorted(nodes.items())
+            },
+        }
+
+    def inspect_node(self, run_id: str, node_id: str) -> dict[str, Any]:
+        """Return one node's recorded contract, checks, and invalidations."""
+        snapshot = self.snapshot(run_id)
+        try:
+            return copy.deepcopy(snapshot["nodes"][node_id])
+        except KeyError as exc:
+            raise ManifestError(f"unknown node: {node_id}") from exc
 
     def record_node(
         self,
@@ -173,6 +208,11 @@ class ManifestStore:
     def _require_state(state: str) -> None:
         if state not in NODE_STATES:
             raise ManifestError(f"unknown state: {state}")
+
+    @staticmethod
+    def _require_run_state(state: str) -> None:
+        if state not in RUN_STATES:
+            raise ManifestError(f"unknown run state: {state}")
 
     @staticmethod
     def _baseline(
