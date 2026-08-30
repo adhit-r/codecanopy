@@ -3,21 +3,21 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="CodeCanopy is a free, open-source Codex plugin for planning the smallest verified, dependency-ready engineering agent tree.">
+    <meta name="description" content="CodeCanopy is a free, open-source Codex plugin for bounded multi-agent graphs across Codex and Claude, with model routing, Git isolation, and evidence-first benchmarks.">
     <meta name="robots" content="index,follow">
-    <title>CodeCanopy | The smallest verified Codex agent tree</title>
+    <title>CodeCanopy | Bounded multi-agent graphs for Codex and Claude</title>
     <link rel="canonical" href="https://adhit-r.github.io/codecanopy/">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="CodeCanopy">
-    <meta property="og:title" content="CodeCanopy | The smallest verified Codex agent tree">
-    <meta property="og:description" content="Plan the smallest dependency-ready engineering tree, keep one lead responsible for integration, and verify upward with evidence.">
+    <meta property="og:title" content="CodeCanopy | Bounded multi-agent graphs for Codex and Claude">
+    <meta property="og:description" content="Plan a dependency-ready engineering graph, route each node to a policy-selected model tier, and keep one lead responsible for verified integration.">
     <meta property="og:url" content="https://adhit-r.github.io/codecanopy/">
     <meta property="og:image" content="https://adhit-r.github.io/codecanopy/codecanopy-social.png">
     <meta property="og:image:alt" content="CodeCanopy dependency route with a nested engineering task rack">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="CodeCanopy | The smallest verified Codex agent tree">
-    <meta name="twitter:description" content="A free Codex plugin for bounded engineering-agent coordination.">
+    <meta name="twitter:title" content="CodeCanopy | Bounded multi-agent graphs">
+    <meta name="twitter:description" content="A free Codex plugin for evidence-first Codex and Claude engineering coordination.">
     <meta name="twitter:image" content="https://adhit-r.github.io/codecanopy/codecanopy-social.png">
     <meta name="twitter:image:alt" content="CodeCanopy dependency route with a nested engineering task rack">
     <link rel="stylesheet" href="styles.css">
@@ -26,7 +26,7 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "CodeCanopy",
-        "description": "A free, open-source Codex plugin for planning bounded engineering agent trees and verifying integration bottom-up.",
+        "description": "A free, open-source Codex plugin for planning bounded multi-agent engineering graphs across Codex and Claude and verifying integration bottom-up.",
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Engineering orchestration plugin",
         "operatingSystem": "Codex",
@@ -54,7 +54,7 @@
     -->
     <header class="site-header">
       <a class="wordmark" href="#top" aria-label="CodeCanopy home">CODECANOPY</a>
-      <p class="descriptor">A Codex engineering orchestration plugin</p>
+      <p class="descriptor">A cross-provider engineering orchestration plugin</p>
       <nav aria-label="Primary navigation">
         <a href="#definition">Contract</a>
         <a href="#configuration">Config</a>
@@ -68,9 +68,9 @@
     <main id="top">
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <h1 id="hero-title">The smallest verified tree that reaches the goal.</h1>
+          <h1 id="hero-title">Parallel agents need a graph. One lead owns the goal.</h1>
           <div class="definition-callout">
-            <p><strong>CodeCanopy is a Codex plugin that turns an engineering goal into the smallest dependency-ready tree of agents.</strong> One lead keeps scope, integration, and the final verdict; work comes back upward with evidence.</p>
+            <p><strong>CodeCanopy turns an engineering goal into a bounded ownership tree and artifact dependency graph for Codex and Claude work.</strong> The tree assigns authority. The graph decides what can safely run next. One lead keeps scope, integration, and the final verdict.</p>
           </div>
           <ol class="mobile-route-proof" aria-label="Condensed ownership route">
             <li>
@@ -220,29 +220,43 @@ reasoning_effort = "high"</code></pre>
 
       <section class="benchmark" id="benchmark" aria-labelledby="benchmark-title">
         <div class="benchmark-intro">
-          <p class="eyebrow">DETERMINISTIC POLICY CHECK</p>
-          <h2 id="benchmark-title">Weights choose the smallest capable model.</h2>
-          <p>Each planning node receives normalized complexity and size scores. CodeCanopy combines them with the configured weights, then applies safety overrides for lead, review, and uncertainty.</p>
-          <p class="benchmark-result"><strong>10/10 routes passed</strong><br><strong>3/3 invalid estimates rejected</strong></p>
-          <p class="benchmark-note">This is a checked-in routing-policy benchmark, not a claim about provider quality, latency, or production throughput.</p>
+          <h2 id="benchmark-title">Configured tier selection is deterministic.</h2>
+          <p>The checked-in fixture scores complexity and size, applies safety overrides, and verifies the expected tier for ten fixed work shapes.</p>
+          <p class="benchmark-result"><strong>10/10 routes passed</strong><br><strong>3/3 invalid estimates rejected</strong><br><strong>6/10 non-lead fixture assignments</strong></p>
+          <p class="benchmark-note">These are policy-conformance results. Actual token change, wall-clock change, and acceptance-quality change have not yet been measured.</p>
         </div>
-        <div class="benchmark-table" role="table" aria-label="Automatic model routing benchmark results">
-          <div class="benchmark-row benchmark-head" role="row">
-            <span role="columnheader">Work shape</span><span role="columnheader">Score</span><span role="columnheader">Tier</span><span role="columnheader">Configured model</span>
+        <div class="benchmark-evidence">
+          <div class="routing-proof" aria-labelledby="routing-proof-title">
+            <div class="proof-heading">
+              <h3 id="routing-proof-title">Fixture assignments</h3>
+              <span>10 fixed cases</span>
+            </div>
+            <div class="routing-lane"><span>Worker</span><span class="routing-meter" aria-hidden="true"><i class="fill-worker"></i></span><strong>2/10</strong></div>
+            <div class="routing-lane"><span>Expert</span><span class="routing-meter" aria-hidden="true"><i class="fill-expert"></i></span><strong>3/10</strong></div>
+            <div class="routing-lane"><span>Lead</span><span class="routing-meter" aria-hidden="true"><i class="fill-lead"></i></span><strong>4/10</strong></div>
+            <div class="routing-lane"><span>Reviewer</span><span class="routing-meter" aria-hidden="true"><i class="fill-reviewer"></i></span><strong>1/10</strong></div>
           </div>
-          <div class="benchmark-row" role="row"><span role="rowheader">README typo</span><span role="cell">0.07</span><span role="cell">worker</span><span role="cell"><code>gpt-5.6-luna</code></span></div>
-          <div class="benchmark-row" role="row"><span role="rowheader">API + persistence</span><span role="cell">0.47</span><span role="cell">expert</span><span role="cell"><code>gpt-5.6-terra</code></span></div>
-          <div class="benchmark-row" role="row"><span role="rowheader">Cross-component feature</span><span role="cell">0.78</span><span role="cell">lead</span><span role="cell"><code>gpt-5.6-sol</code></span></div>
-          <div class="benchmark-row" role="row"><span role="rowheader">Security boundary</span><span role="cell">0.36</span><span role="cell">lead override</span><span role="cell"><code>gpt-5.6-sol</code></span></div>
-          <div class="benchmark-row" role="row"><span role="rowheader">Accepted-change review</span><span role="cell">0.24</span><span role="cell">reviewer</span><span role="cell"><code>gpt-5.6-terra</code></span></div>
-          <div class="benchmark-row" role="row"><span role="rowheader">Missing estimate</span><span role="cell">n/a</span><span role="cell">expert floor</span><span role="cell"><code>gpt-5.6-terra</code></span></div>
+
+          <div class="evidence-table" role="table" aria-label="Current CodeCanopy benchmark evidence">
+            <div class="evidence-row evidence-head" role="row"><span role="columnheader">Metric</span><span role="columnheader">Observed</span></div>
+            <div class="evidence-row" role="row"><span role="rowheader">Routing conformance</span><span role="cell">10/10 passed</span></div>
+            <div class="evidence-row" role="row"><span role="rowheader">Invalid estimates</span><span role="cell">3/3 rejected</span></div>
+            <div class="evidence-row" role="row"><span role="rowheader">Non-lead fixture assignments</span><span role="cell">6/10</span></div>
+            <div class="evidence-row evidence-unmeasured" role="row"><span role="rowheader">Token, time, and quality delta</span><span role="cell">Not measured</span></div>
+          </div>
+
+          <div class="benchmark-method">
+            <h3>Comparative evidence starts with paired runs.</h3>
+            <p>The next benchmark holds the task, baseline, tools, permissions, and acceptance checks constant: one lead runs sequentially, then CodeCanopy runs the graph. It records provider-reported input and output tokens, root overhead, wall time, pass rate, retries, conflicts, node count, dispatch waves, and critical-path length across Codex-only, Claude-only, and authorized mixed-provider runs.</p>
+            <p><a href="https://github.com/adhit-r/codecanopy/blob/main/benchmarks/README.md">Read the benchmark contract</a></p>
+          </div>
         </div>
       </section>
 
       <section class="knowledge" id="definition" aria-labelledby="definition-title">
         <div class="knowledge-intro">
-          <h2 id="definition-title">A direct definition, not a swarm promise.</h2>
-          <p>CodeCanopy is free and open source under the MIT License. It helps a lead turn a non-trivial engineering requirement into the smallest useful ownership tree, order work through artifact dependencies, and integrate verified results bottom-up.</p>
+          <h2 id="definition-title">The graph is the control model, not a group chat.</h2>
+          <p>CodeCanopy is free and open source under the MIT License. Its ownership tree records authority and integration responsibility; its artifact DAG records dependencies and the critical frontier. Only work that can advance the next accepted proof becomes ready. This is a bounded planning rule, not a claim of globally optimal shortest-path execution.</p>
         </div>
 
         <div class="comparison" aria-labelledby="comparison-title">
@@ -258,6 +272,9 @@ reasoning_effort = "high"</code></pre>
               <span role="rowheader">What may execute?</span><span role="cell">Dependency-ready leaves</span><span role="cell">Any work that is dispatched</span>
             </div>
             <div class="comparison-row" role="row">
+              <span role="rowheader">How do model families collaborate?</span><span role="cell">Root-verified artifacts and commits</span><span role="cell">Shared transcript or ad hoc messages</span>
+            </div>
+            <div class="comparison-row" role="row">
               <span role="rowheader">How does work finish?</span><span role="cell">Evidence is integrated bottom-up</span><span role="cell">The coordination rule is left to the team</span>
             </div>
           </div>
@@ -266,16 +283,16 @@ reasoning_effort = "high"</code></pre>
         <div class="faq" aria-labelledby="faq-title">
           <h2 id="faq-title">Frequently asked questions</h2>
           <details>
-            <summary>Does v0.4 support both Codex and Claude?</summary>
-            <p>Yes, the provider-neutral tree can assign either CLI per node. Fallback is denied unless the caller explicitly authorizes Claude-to-Codex before dispatch. This does not claim provider equivalence or production support.</p>
+            <summary>Can one tree use both Codex and Claude?</summary>
+            <p>Yes. The local runtime can assign either CLI per node. A user-authorized Codex app task is a separate execution surface and may return an independent branch through the same root acceptance barrier. Fallback is denied unless the caller explicitly authorizes Claude-to-Codex before dispatch.</p>
           </details>
           <details>
-            <summary>Who creates and verifies isolated worktrees?</summary>
-            <p>CodeCanopy's root does so where needed. The host enforces only its documented sandbox, approval, model-availability, and concurrency boundaries.</p>
+            <summary>Can tasks communicate through one Markdown file?</summary>
+            <p>The root may generate a human-readable team-room projection when repository writes are authorized, but children never edit it concurrently. Tasks exchange narrow evidence through the root so status text cannot become authority or accepted state.</p>
           </details>
           <details>
-            <summary>Can project configuration grant a new permission?</summary>
-            <p>No. Configuration can tune planning limits and preferred model mappings, but it cannot grant Git, network, destructive, credential, production, or publication authority.</p>
+            <summary>Can configuration add another model provider?</summary>
+            <p>No. Other families need a reviewed, allowlisted adapter with capability, isolation, credential, timeout, and proof boundaries. Configuration cannot add an arbitrary command or grant Git, network, destructive, credential, production, or publication authority.</p>
           </details>
         </div>
       </section>

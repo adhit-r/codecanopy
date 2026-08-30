@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import math
 import time
 import tomllib
@@ -123,8 +124,10 @@ INVALID_CASES = (
 def run(config: RoutingConfig) -> int:
     started = time.perf_counter_ns()
     failures = []
+    assignments = []
     for node, expected in CASES:
         decision = route_node(node, config)
+        assignments.append(decision.tier)
         score = "n/a" if decision.score is None else f"{decision.score:.2f}"
         print(f"{node.name:28} score={score:>4} tier={decision.tier:8} model={decision.model}")
         if decision.tier != expected:
@@ -134,6 +137,16 @@ def run(config: RoutingConfig) -> int:
     print(f"summary: {passed}/{len(CASES)} routing cases passed in {elapsed_ms:.2f} ms")
     if failures:
         raise AssertionError("; ".join(failures))
+    distribution = Counter(assignments)
+    non_lead = len(assignments) - distribution["lead"]
+    print(
+        "distribution: "
+        f"worker={distribution['worker']} "
+        f"expert={distribution['expert']} "
+        f"lead={distribution['lead']} "
+        f"reviewer={distribution['reviewer']} "
+        f"non_lead={non_lead}/{len(assignments)}"
+    )
     rejected = 0
     for node in INVALID_CASES:
         try:
