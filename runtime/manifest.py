@@ -401,8 +401,10 @@ class ManifestStore:
             if not line.strip():
                 continue
             events += 1
-            if events > MAX_MANIFEST_EVENTS or len(line.encode("utf-8")) > MAX_EVENT_BYTES:
+            if events > MAX_MANIFEST_EVENTS:
                 raise ManifestError("manifest event limit exceeded")
+            if len(line.encode("utf-8")) > MAX_EVENT_BYTES:
+                raise ManifestError("manifest event size limit exceeded")
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from runtime.manifest import INVALIDATION_RULE, MAX_MANIFEST_BYTES, ManifestError, ManifestStore
+from runtime.manifest import INVALIDATION_RULE, MAX_EVENT_BYTES, MAX_MANIFEST_BYTES, ManifestError, ManifestStore
 
 
 class ManifestStoreTests(unittest.TestCase):
@@ -125,6 +125,19 @@ class ManifestStoreTests(unittest.TestCase):
             os.close(descriptor)
         with self.assertRaisesRegex(ManifestError, "size limit"):
             ManifestStore(oversized).snapshot("run-1")
+
+    def test_oversized_event_reports_the_event_size_limit(self):
+        oversized_row = {
+            "seq": 1,
+            "kind": "run-created",
+            "run_id": "run-1",
+            "state": "planned",
+            "details": {"padding": "x" * MAX_EVENT_BYTES},
+        }
+        self.path.write_text(json.dumps(oversized_row) + "\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ManifestError, "event size limit"):
+            ManifestStore(self.path).snapshot("run-1")
 
     def test_append_rejects_the_event_after_the_limit(self):
         original = self.path.read_bytes()
