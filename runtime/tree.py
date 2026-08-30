@@ -23,6 +23,7 @@ from .providers import (
     append_proof_receipt,
     execute_provider,
     prepare_isolated_worktree,
+    validate_provider_settings,
 )
 
 
@@ -126,10 +127,14 @@ def run_tree(
     _validate_run_id(run_id)
     if execution_policy_hash is not None and not _POLICY_HASH.fullmatch(execution_policy_hash):
         raise ValueError("execution_policy_hash must be a lowercase SHA-256 digest")
-    settings_by_node = {
-        node.node_id: execution_settings(node) if execution_settings is not None else (None, None)
-        for node in ordered
-    }
+    settings_by_node: dict[str, tuple[str | None, str | None]] = {}
+    for node in ordered:
+        settings = execution_settings(node) if execution_settings is not None else (None, None)
+        if not isinstance(settings, tuple) or len(settings) != 2:
+            raise ValueError("execution_settings must return an exact 2-tuple")
+        model, reasoning_effort = settings
+        validate_provider_settings(node.provider, model, reasoning_effort)
+        settings_by_node[node.node_id] = (model, reasoning_effort)
     if worktree_root is not None and repo is None:
         raise ValueError("repo is required when worktree_root is provided")
     store = ManifestStore(manifest_path)

@@ -122,6 +122,44 @@ class MixedTreeTests(unittest.TestCase):
         self.assertEqual([("gpt-5.6-luna", "medium"), ("gpt-5.6-terra", "high")], calls)
         self.assertEqual(policy_hash, snapshot["nodes"]["one"]["details"]["execution_policy_hash"])
 
+    def test_invalid_execution_settings_fail_before_manifest_or_execution(self):
+        cases = (
+            ("missing tuple", "codex", None, "exact 2-tuple"),
+            ("short tuple", "codex", (None,), "exact 2-tuple"),
+            ("long tuple", "codex", (None, None, None), "exact 2-tuple"),
+            ("mutable pair", "codex", [None, None], "exact 2-tuple"),
+            ("invalid model", "codex", ("../../escape", None), "model"),
+            ("invalid effort", "codex", (None, "fast"), "reasoning_effort"),
+            ("Claude model", "claude", ("claude-sonnet", None), "Claude"),
+            ("Claude effort", "claude", (None, "high"), "Claude"),
+        )
+        for label, provider, settings, message in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                manifest = Path(directory) / "run.jsonl"
+                resolutions = []
+                executions = []
+
+                def resolve(node):
+                    resolutions.append(node.node_id)
+                    return settings
+
+                def execute(_request):
+                    executions.append(True)
+                    self.fail("invalid settings must not execute")
+
+                with self.assertRaisesRegex(ValueError, message):
+                    run_tree(
+                        [TreeNode("one", "first", provider)],
+                        manifest_path=manifest,
+                        run_id="invalid-settings",
+                        execution_settings=resolve,
+                        execute=execute,
+                    )
+
+                self.assertEqual(["one"], resolutions)
+                self.assertEqual([], executions)
+                self.assertFalse(manifest.exists())
+
     def test_changed_policy_hash_rejects_recovery_before_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "run.jsonl"

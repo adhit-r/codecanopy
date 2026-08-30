@@ -376,19 +376,29 @@ def _validate_provider(provider: str) -> None:
         raise ValueError(f"unsupported provider: {provider}")
 
 
+def validate_provider_settings(
+    provider: str,
+    model: str | None,
+    reasoning_effort: str | None,
+) -> None:
+    """Validate provider selection settings without inspecting runtime state."""
+    _validate_provider(provider)
+    if model is not None and (not isinstance(model, str) or not MODEL_ID.fullmatch(model)):
+        raise ValueError("model must be a 1-128 character provider identifier")
+    if reasoning_effort is not None and (
+        not isinstance(reasoning_effort, str) or reasoning_effort not in REASONING_EFFORTS
+    ):
+        raise ValueError(f"reasoning_effort must be one of {sorted(REASONING_EFFORTS)}")
+    if provider == "claude" and (model is not None or reasoning_effort is not None):
+        raise ValueError("Claude requests cannot select model or reasoning effort")
+
+
 def _validate_request(request: ProviderRequest) -> None:
     if not request.prompt.strip() or len(request.prompt) > MAX_PROMPT_CHARS:
         raise ValueError(f"prompt must contain 1-{MAX_PROMPT_CHARS} characters")
     if not 0 < request.timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 0 and {MAX_TIMEOUT_SECONDS}")
-    if request.model is not None and not MODEL_ID.fullmatch(request.model):
-        raise ValueError("model must be a 1-128 character provider identifier")
-    if request.reasoning_effort is not None and request.reasoning_effort not in REASONING_EFFORTS:
-        raise ValueError(f"reasoning_effort must be one of {sorted(REASONING_EFFORTS)}")
-    if request.preferred_provider == "claude" and (
-        request.model is not None or request.reasoning_effort is not None
-    ):
-        raise ValueError("Claude requests cannot select model or reasoning effort")
+    validate_provider_settings(request.preferred_provider, request.model, request.reasoning_effort)
     cwd = Path(request.cwd or Path.cwd())
     if not cwd.is_dir():
         raise ValueError(f"provider working directory does not exist: {cwd}")
