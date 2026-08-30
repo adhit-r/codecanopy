@@ -176,7 +176,13 @@ def append_result_record(path: str | Path, record: Mapping[str, object]) -> None
             if existing_size > MAX_RESULT_BYTES:
                 raise ValueError("benchmark result size limit exceeded")
             handle.seek(0)
-            events = sum(1 for line in handle if line.strip())
+            events = 0
+            for line in handle:
+                if not line.strip():
+                    continue
+                if len(line.encode("utf-8")) > MAX_RESULT_EVENT_BYTES:
+                    raise ValueError("benchmark result event size limit exceeded")
+                events += 1
             if events >= MAX_RESULT_EVENTS:
                 raise ValueError("benchmark result event limit exceeded")
             if existing_size + encoded_size > MAX_RESULT_BYTES:

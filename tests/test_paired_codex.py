@@ -65,6 +65,14 @@ class PairedCodexTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(18, len(first.entries))
         self.assertEqual(list(range(18)), [entry.position for entry in first.entries])
+        self.assertEqual(
+            [
+                "sequential", "canopy", "sequential", "canopy", "canopy", "sequential",
+                "canopy", "sequential", "sequential", "canopy", "sequential", "canopy",
+                "sequential", "canopy", "sequential", "canopy", "canopy", "sequential",
+            ],
+            [entry.arm for entry in first.entries],
+        )
         pairs = {(entry.case_id, entry.repetition) for entry in first.entries}
         self.assertEqual(9, len(pairs))
         for pair in pairs:
@@ -120,6 +128,22 @@ class PairedCodexTests(unittest.TestCase):
             path.write_bytes(b"x" * (paired_codex.MAX_RESULT_BYTES + 1))
             original = path.read_bytes()
             with self.assertRaisesRegex(ValueError, "size limit"):
+                paired_codex.append_result_record(path, {"kind": "arm-result"})
+            self.assertEqual(original, path.read_bytes())
+
+    def test_result_rejects_preexisting_oversized_event_without_mutation(self):
+        existing = json.dumps(
+            {"kind": "arm-result", "padding": "x" * paired_codex.MAX_RESULT_EVENT_BYTES},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        self.assertGreater(len(existing), paired_codex.MAX_RESULT_EVENT_BYTES)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            path.write_bytes(existing)
+            path.chmod(0o600)
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "event size limit"):
                 paired_codex.append_result_record(path, {"kind": "arm-result"})
             self.assertEqual(original, path.read_bytes())
 
