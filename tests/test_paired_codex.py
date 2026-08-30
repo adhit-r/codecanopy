@@ -160,6 +160,39 @@ def complete_arm_record(schedule):
     )
 
 
+def complete_canopy_record(schedule):
+    base = complete_arm_record(schedule)
+    entry = next(
+        entry for entry in schedule.entries
+        if entry.case_id == "small" and entry.repetition == 1 and entry.arm == "canopy"
+    )
+    slug = f"{entry.position:03d}-{entry.case_id}-{entry.arm}"
+    leaf = replace(
+        base.invocations[0],
+        node_id="percentage",
+        requested_model="gpt-5.6-luna",
+        requested_reasoning_effort="medium",
+        actual_model="gpt-5.6-luna",
+        receipt=f"receipts/{slug}/percentage.jsonl",
+    )
+    reviewer = replace(
+        base.invocations[0],
+        node_id="reviewer",
+        requested_model="gpt-5.6-terra",
+        actual_model="gpt-5.6-terra",
+        receipt=f"receipts/{slug}/reviewer.jsonl",
+        output_hash="e" * 64,
+    )
+    return replace(
+        base,
+        entry=entry,
+        invocations=(leaf, reviewer),
+        planned_nodes=2,
+        executed_nodes=2,
+        critical_path_nodes=2,
+    )
+
+
 class PairedCodexTests(unittest.TestCase):
     def test_seeded_schedule_has_nine_pairs_and_eighteen_unique_positions(self):
         contract = fake_run_contract()
@@ -364,6 +397,77 @@ class PairedCodexTests(unittest.TestCase):
                 )
                 with path.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+                original = path.read_bytes()
+                with self.assertRaisesRegex(ValueError, "arm result"):
+                    paired_codex.load_results(path)
+                self.assertEqual(original, path.read_bytes())
+
+    def test_result_loader_rejects_impossible_normalized_arm_states(self):
+        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        sequential = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
+        canopy = {"kind": "arm-result", **asdict(complete_canopy_record(schedule))}
+
+        def duplicate_lead_and_receipt(row):
+            row["invocations"].append(dict(row["invocations"][0]))
+            row["planned_nodes"] = 2
+            row["executed_nodes"] = 2
+
+        def fallback_used(row):
+            row["invocations"][0]["fallback_used"] = True
+
+        def missing_actual_model_evidence(row):
+            row["invocations"][0]["actual_model"] = None
+
+        def accepted_below_threshold(row):
+            row["score"] = {
+                "tp": 1,
+                "fp": 1,
+                "fn": 0,
+                "precision": 0.5,
+                "recall": 1.0,
+                "f1": 2 / 3,
+                "accepted": True,
+            }
+
+        def noncanonical_receipt(row):
+            row["invocations"][0]["receipt"] = "receipts/other/lead.jsonl"
+
+        def failed_without_evidence(row):
+            row["invocations"][0]["status"] = "failed"
+            row["invocations"][0]["exit_code"] = 7
+            row["failed_nodes"] = 1
+
+        def duplicate_canopy_receipt(row):
+            row["invocations"][1]["receipt"] = row["invocations"][0]["receipt"]
+
+        def scored_canopy_without_reviewer(row):
+            row["invocations"] = row["invocations"][:1]
+            row["executed_nodes"] = 1
+            row["pruned_nodes"] = 1
+
+        def reviewer_not_last(row):
+            row["invocations"].reverse()
+
+        cases = (
+            ("duplicate_lead_and_receipt", sequential, duplicate_lead_and_receipt),
+            ("fallback_used", sequential, fallback_used),
+            ("missing_actual_model_evidence", sequential, missing_actual_model_evidence),
+            ("accepted_below_threshold", sequential, accepted_below_threshold),
+            ("noncanonical_receipt", sequential, noncanonical_receipt),
+            ("failed_without_evidence", sequential, failed_without_evidence),
+            ("duplicate_canopy_receipt", canopy, duplicate_canopy_receipt),
+            ("scored_canopy_without_reviewer", canopy, scored_canopy_without_reviewer),
+            ("reviewer_not_last", canopy, reviewer_not_last),
+        )
+        for name, template, mutate in cases:
+            row = json.loads(json.dumps(template))
+            mutate(row)
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(
+                    path, {"kind": "schedule", **asdict(schedule)}
+                )
+                paired_codex.append_result_record(path, row)
                 original = path.read_bytes()
                 with self.assertRaisesRegex(ValueError, "arm result"):
                     paired_codex.load_results(path)

@@ -441,7 +441,7 @@ def _invocation_from_record(value: object) -> InvocationRecord:
     row = _exact_mapping(
         value, set(InvocationRecord.__dataclass_fields__), "arm result invocation"
     )
-    if not isinstance(row["fallback_used"], bool):
+    if not isinstance(row["fallback_used"], bool) or row["fallback_used"]:
         raise _arm_result_error()
     requested_provider = _arm_text(row["requested_provider"])
     provider = _arm_text(row["provider"], optional=True)
@@ -449,6 +449,12 @@ def _invocation_from_record(value: object) -> InvocationRecord:
     if requested_provider != "codex" or provider not in {None, "codex"}:
         raise _arm_result_error()
     if status not in {"completed", "failed", "timed_out", "unavailable"}:
+        raise _arm_result_error()
+    node_id = _arm_text(row["node_id"])
+    if (
+        len(node_id) > 64
+        or any(not (character.isalnum() or character in "._-") for character in node_id)
+    ):
         raise _arm_result_error()
     receipt = _arm_text(row["receipt"])
     if _relative_path(receipt) != receipt:
@@ -468,15 +474,40 @@ def _invocation_from_record(value: object) -> InvocationRecord:
         raise _arm_result_error()
     if populated and tokens["total_tokens"] != tokens["input_tokens"] + tokens["output_tokens"]:
         raise _arm_result_error()
+    reasons = _arm_reasons(row["incomplete_reasons"])
+    exit_code = _arm_int(row["exit_code"], optional=True)
+    actual_model = _arm_text(row["actual_model"], optional=True)
+    status_reason = f"provider_{status}"
+    provider_status_reasons = {
+        reason for reason in reasons
+        if reason in {"provider_failed", "provider_timed_out", "provider_unavailable"}
+    }
+    expected_status_reasons = set() if status == "completed" else {status_reason}
+    if provider_status_reasons != expected_status_reasons:
+        raise _arm_result_error()
+    if status == "completed" and (provider != "codex" or exit_code != 0):
+        raise _arm_result_error()
+    if status == "failed" and (
+        provider != "codex" or exit_code == 0
+    ):
+        raise _arm_result_error()
+    if status == "timed_out" and (provider != "codex" or exit_code is not None):
+        raise _arm_result_error()
+    if status == "unavailable" and (provider is not None or exit_code is not None):
+        raise _arm_result_error()
+    if (actual_model is None) != ("actual_model_unavailable" in reasons):
+        raise _arm_result_error()
+    if "provider_fallback_used" in reasons:
+        raise _arm_result_error()
     return InvocationRecord(
-        node_id=_arm_text(row["node_id"]),
+        node_id=node_id,
         requested_provider=requested_provider,
         provider=provider,
         fallback_used=row["fallback_used"],
-        exit_code=_arm_int(row["exit_code"], optional=True),
+        exit_code=exit_code,
         requested_model=_arm_text(row["requested_model"]),
         requested_reasoning_effort=_arm_text(row["requested_reasoning_effort"]),
-        actual_model=_arm_text(row["actual_model"], optional=True),
+        actual_model=actual_model,
         status=status,
         receipt=receipt,
         output_hash=output_hash,
@@ -486,7 +517,7 @@ def _invocation_from_record(value: object) -> InvocationRecord:
         output_tokens=tokens["output_tokens"],
         reasoning_output_tokens=tokens["reasoning_output_tokens"],
         total_tokens=tokens["total_tokens"],
-        incomplete_reasons=_arm_reasons(row["incomplete_reasons"]),
+        incomplete_reasons=reasons,
     )
 
 
@@ -510,6 +541,9 @@ def _score_from_record(value: object) -> Score | None:
         (precision, expected_precision), (recall, expected_recall), (f1, expected_f1)
     )):
         raise _arm_result_error()
+    if row["accepted"] and (precision < 0.8 or recall < 0.8):
+        raise _arm_result_error()
+    # Matched severity identities are not persisted; fn == 0 already proves full coverage.
     return Score(tp, fp, fn, precision, recall, f1, row["accepted"])
 
 
@@ -545,6 +579,9 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
         failed = _arm_int(row["failed_nodes"])
         pruned = _arm_int(row["pruned_nodes"])
         critical = _arm_int(row["critical_path_nodes"])
+        node_ids = tuple(invocation.node_id for invocation in invocations)
+        receipts = tuple(invocation.receipt for invocation in invocations)
+        slug = f"{entry.position:03d}-{entry.case_id}-{entry.arm}"
         if (
             planned < 1
             or executed != len(invocations)
@@ -554,12 +591,57 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
             or not 1 <= critical <= planned
             or any(reason not in reasons for invocation in invocations
                    for reason in invocation.incomplete_reasons)
+            or len(set(node_ids)) != len(node_ids)
+            or len(set(receipts)) != len(receipts)
+            or any(
+                invocation.receipt
+                != f"receipts/{slug}/{invocation.node_id}.jsonl"
+                for invocation in invocations
+            )
         ):
+            raise _arm_result_error()
+        if entry.arm == "sequential":
+            if (
+                planned != 1
+                or critical != 1
+                or node_ids not in {(), ("lead",)}
+                or score is not None and node_ids != ("lead",)
+                or score is not None and invocations[0].status != "completed"
+            ):
+                raise _arm_result_error()
+        elif entry.arm == "canopy":
+            reviewer_positions = tuple(
+                index for index, node_id in enumerate(node_ids) if node_id == "reviewer"
+            )
+            if (
+                planned < 2
+                or critical != 2
+                or "lead" in node_ids
+                or len(reviewer_positions) > 1
+                or reviewer_positions and reviewer_positions != (len(node_ids) - 1,)
+                or reviewer_positions and executed != planned
+                or reviewer_positions and any(
+                    invocation.status != "completed" for invocation in invocations[:-1]
+                )
+                or not reviewer_positions and executed > planned - 1
+                or score is not None and (
+                    not reviewer_positions
+                    or executed != planned
+                    or invocations[-1].status != "completed"
+                )
+            ):
+                raise _arm_result_error()
+        else:
             raise _arm_result_error()
         completion_state = _arm_text(row["completion_state"])
         if completion_state not in {"complete", "incomplete", "interrupted"}:
             raise _arm_result_error()
-        if completion_state == "complete" and (score is None or reasons):
+        if completion_state == "complete" and (
+            score is None
+            or reasons
+            or executed != planned
+            or failed
+        ):
             raise _arm_result_error()
         if completion_state == "incomplete" and not reasons:
             raise _arm_result_error()
