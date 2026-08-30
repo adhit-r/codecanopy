@@ -585,6 +585,62 @@ class PairedCodexTests(unittest.TestCase):
                 loaded_records,
             )
 
+    def test_acceptance_resumes_schedule_only_ledger_with_absent_state_root(self):
+        schedule, records, _receipt_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        by_entry = {record.entry: record for record in records}
+        state_root_observations = []
+
+        def fake_runner(_case, entry, _config, _contract, _snapshot, _plan, **kwargs):
+            metadata = kwargs["state_root"].stat()
+            state_root_observations.append((
+                stat.S_ISDIR(metadata.st_mode),
+                stat.S_IMODE(metadata.st_mode),
+            ))
+            return by_entry[entry]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "schedule-only.jsonl"
+            state_root = root / "absent-private-state"
+            paired_codex.append_result_record(
+                results, {"kind": "schedule", **asdict(schedule)}
+            )
+
+            with patch.object(
+                paired_codex, "_build_command_schedule", return_value=(
+                    schedule, fake_case_definitions(), fake_routing_config()
+                )
+            ), patch.object(
+                paired_codex, "run_sequential_arm", side_effect=fake_runner
+            ), patch.object(
+                paired_codex, "run_canopy_arm", side_effect=fake_runner
+            ), patch.object(
+                paired_codex, "execute_provider"
+            ) as execute, redirect_stdout(io.StringIO()):
+                status = paired_codex._acceptance_command(results, state_root, 41)
+
+            rows = [
+                json.loads(line)
+                for line in results.read_text(encoding="utf-8").splitlines()
+            ]
+            loaded_schedule, loaded_records = paired_codex.load_results(results)
+
+            self.assertEqual(0, status)
+            self.assertEqual([(True, 0o700), (True, 0o700)], state_root_observations)
+            self.assertEqual(["schedule", "arm-result", "arm-result"], [
+                row["kind"] for row in rows
+            ])
+            self.assertEqual(schedule, loaded_schedule)
+            self.assertTrue(all(
+                isinstance(record, paired_codex.ArmRecord) for record in loaded_records
+            ))
+            self.assertEqual(
+                tuple(by_entry[entry] for entry in schedule.entries[:2]),
+                loaded_records,
+            )
+            execute.assert_not_called()
+
     def test_acceptance_does_not_double_append_runner_interrupt_evidence(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)
