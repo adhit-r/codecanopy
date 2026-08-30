@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path, PurePath
+import re
 import selectors
 import shutil
 import signal
@@ -80,6 +81,8 @@ MAX_RECEIPT_BYTES = 4 * 1024 * 1024
 MAX_RECEIPT_EVENTS = 20_000
 MAX_RECEIPT_EVENT_BYTES = 64 * 1024
 GIT_OPERATION_TIMEOUT_SECONDS = 30
+MODEL_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
 _SAFE_ENVIRONMENT = frozenset(
     {
         "PATH",
@@ -117,6 +120,8 @@ class ProviderRequest:
     cwd: str | Path | None = None
     allow_fallback: bool = False
     write_access: bool = False
+    model: str | None = None
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,7 +202,12 @@ def execute_provider(
             fallback_reason=fallback_reason,
         )
 
-    command = _provider_command(selected, request.write_access)
+    command = _provider_command(
+        selected,
+        request.write_access,
+        model=request.model,
+        reasoning_effort=request.reasoning_effort,
+    )
     dispatched_prompt = SECURITY_PREAMBLE + request.prompt
     command = (executable, *command[1:], dispatched_prompt)
     try:
@@ -261,6 +271,8 @@ def append_proof_receipt(
         "fallback_reason": result.receipt_data.get("fallback_reason"),
         "exit_code": result.exit_code,
         "timeout_seconds": request.timeout_seconds,
+        "requested_model": request.model,
+        "requested_reasoning_effort": request.reasoning_effort,
     }
     receipt.update(
         prompt_hash=_hash(request.prompt),
@@ -347,6 +359,8 @@ def _result(
         "fallback_reason": fallback_reason,
         "exit_code": exit_code,
         "timeout_seconds": request.timeout_seconds,
+        "requested_model": request.model,
+        "requested_reasoning_effort": request.reasoning_effort,
         "prompt_hash": _hash(request.prompt),
         "output_hash": _hash(output),
     }
@@ -362,11 +376,29 @@ def _validate_provider(provider: str) -> None:
         raise ValueError(f"unsupported provider: {provider}")
 
 
+def validate_provider_settings(
+    provider: str,
+    model: str | None,
+    reasoning_effort: str | None,
+) -> None:
+    """Validate provider selection settings without inspecting runtime state."""
+    _validate_provider(provider)
+    if model is not None and (not isinstance(model, str) or not MODEL_ID.fullmatch(model)):
+        raise ValueError("model must be a 1-128 character provider identifier")
+    if reasoning_effort is not None and (
+        not isinstance(reasoning_effort, str) or reasoning_effort not in REASONING_EFFORTS
+    ):
+        raise ValueError(f"reasoning_effort must be one of {sorted(REASONING_EFFORTS)}")
+    if provider == "claude" and (model is not None or reasoning_effort is not None):
+        raise ValueError("Claude requests cannot select model or reasoning effort")
+
+
 def _validate_request(request: ProviderRequest) -> None:
     if not request.prompt.strip() or len(request.prompt) > MAX_PROMPT_CHARS:
         raise ValueError(f"prompt must contain 1-{MAX_PROMPT_CHARS} characters")
     if not 0 < request.timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 0 and {MAX_TIMEOUT_SECONDS}")
+    validate_provider_settings(request.preferred_provider, request.model, request.reasoning_effort)
     cwd = Path(request.cwd or Path.cwd())
     if not cwd.is_dir():
         raise ValueError(f"provider working directory does not exist: {cwd}")
@@ -380,13 +412,23 @@ def _provider_environment(provider: ProviderName, *, include_credentials: bool =
     return environment
 
 
-def _provider_command(provider: ProviderName, write_access: bool) -> tuple[str, ...]:
+def _provider_command(
+    provider: ProviderName,
+    write_access: bool,
+    *,
+    model: str | None,
+    reasoning_effort: str | None,
+) -> tuple[str, ...]:
     command = list(DEFAULT_COMMANDS[provider])
     if write_access:
         mode = "workspace-write" if provider == "codex" else "acceptEdits"
         command[command.index("read-only" if provider == "codex" else "plan")] = mode
         if provider == "claude":
             command[command.index("Read,Grep,Glob")] = "Read,Edit,Write,Grep,Glob"
+    if provider == "codex" and model is not None:
+        command.extend(("--model", model))
+    if provider == "codex" and reasoning_effort is not None:
+        command.extend(("--config", f'model_reasoning_effort="{reasoning_effort}"'))
     return tuple(command)
 
 

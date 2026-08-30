@@ -23,16 +23,24 @@ from .providers import (
     append_proof_receipt,
     execute_provider,
     prepare_isolated_worktree,
+    validate_provider_settings,
 )
 
 
 _NODE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 _RUN_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 _IMMUTABLE_COMMIT = re.compile(r"^[0-9a-fA-F]{40,64}$")
+_POLICY_HASH = re.compile(r"^[0-9a-f]{64}$")
 MAX_PLAN_BYTES = 1024 * 1024
 MAX_NODES = 9
 MAX_DEPTH = 3
 MAX_DEPENDENCIES = 3
+
+ExecutionSettings = Callable[["TreeNode"], tuple[str | None, str | None]]
+
+
+class ReceiptEvidenceError(RuntimeError):
+    """The provider returned, but its proof receipt could not be persisted."""
 
 
 @dataclass(frozen=True)
@@ -111,10 +119,22 @@ def run_tree(
     prepare: Callable[..., Path] = prepare_isolated_worktree,
     accept: Callable[[TreeNode, ProviderResult], bool] | None = None,
     allow_provider_fallback: bool = False,
+    execution_settings: ExecutionSettings | None = None,
+    execution_policy_hash: str | None = None,
 ) -> dict[str, object]:
     """Run ready nodes in dependency order and leave resume evidence in JSONL."""
     ordered = _topological(tuple(nodes))
     _validate_run_id(run_id)
+    if execution_policy_hash is not None and not _POLICY_HASH.fullmatch(execution_policy_hash):
+        raise ValueError("execution_policy_hash must be a lowercase SHA-256 digest")
+    settings_by_node: dict[str, tuple[str | None, str | None]] = {}
+    for node in ordered:
+        settings = execution_settings(node) if execution_settings is not None else (None, None)
+        if not isinstance(settings, tuple) or len(settings) != 2:
+            raise ValueError("execution_settings must return an exact 2-tuple")
+        model, reasoning_effort = settings
+        validate_provider_settings(node.provider, model, reasoning_effort)
+        settings_by_node[node.node_id] = (model, reasoning_effort)
     if worktree_root is not None and repo is None:
         raise ValueError("repo is required when worktree_root is provided")
     store = ManifestStore(manifest_path)
@@ -140,8 +160,16 @@ def run_tree(
         _verify_dependency_commits(node, resolved_baselines[node.node_id], repository)
     for node in ordered:
         baseline = resolved_baselines[node.node_id]
+        requested_model, requested_reasoning_effort = settings_by_node[node.node_id]
         if node.node_id in known:
-            _verify_saved_contract(snapshot["nodes"][node.node_id], node, baseline)
+            _verify_saved_contract(
+                snapshot["nodes"][node.node_id],
+                node,
+                baseline,
+                requested_model,
+                requested_reasoning_effort,
+                execution_policy_hash,
+            )
             continue
         store.record_node(
             run_id,
@@ -153,6 +181,9 @@ def run_tree(
             provider=node.provider,
             timeout_seconds=node.timeout_seconds,
             worktree_name=node.worktree_name,
+            requested_model=requested_model,
+            requested_reasoning_effort=requested_reasoning_effort,
+            execution_policy_hash=execution_policy_hash,
         )
     store.set_run_state(run_id, "active")
     receipts = Path(receipt_dir) if receipt_dir else Path(manifest_path).parent / "receipts"
@@ -185,17 +216,24 @@ def run_tree(
             cwd=cwd,
             allow_fallback=allow_provider_fallback,
             write_access=worktree_root is not None,
+            model=settings_by_node[node.node_id][0],
+            reasoning_effort=settings_by_node[node.node_id][1],
         )
         result = execute(request)
         receipt_path = receipts / f"{node.node_id}.jsonl"
-        append_proof_receipt(
-            receipt_path,
-            request,
-            result,
-            run_id=run_id,
-            node_id=node.node_id,
-            baseline=resolved_baselines[node.node_id],
-        )
+        try:
+            append_proof_receipt(
+                receipt_path,
+                request,
+                result,
+                run_id=run_id,
+                node_id=node.node_id,
+                baseline=resolved_baselines[node.node_id],
+            )
+        except (OSError, ValueError) as error:
+            raise ReceiptEvidenceError(
+                f"proof receipt evidence failed for node {node.node_id}"
+            ) from error
         store.record_check(run_id, node.node_id, "provider invocation", result.status, evidence=str(receipt_path))
         store.set_node_state(run_id, node.node_id, "returned")
         accepted = result.status == "completed" and accept is not None and accept(node, result)
@@ -242,7 +280,14 @@ def _resolve_baseline(revision: str, repo: str | Path | None) -> str:
     return commit.lower()
 
 
-def _verify_saved_contract(current: Mapping[str, object], node: TreeNode, baseline: str) -> None:
+def _verify_saved_contract(
+    current: Mapping[str, object],
+    node: TreeNode,
+    baseline: str,
+    requested_model: str | None,
+    requested_reasoning_effort: str | None,
+    execution_policy_hash: str | None,
+) -> None:
     """Reject a same-ID redispatch when its recorded execution contract changed."""
     details = current.get("details", {})
     if not isinstance(details, Mapping):
@@ -252,6 +297,9 @@ def _verify_saved_contract(current: Mapping[str, object], node: TreeNode, baseli
         "provider": node.provider,
         "timeout_seconds": node.timeout_seconds,
         "worktree_name": node.worktree_name,
+        "requested_model": requested_model,
+        "requested_reasoning_effort": requested_reasoning_effort,
+        "execution_policy_hash": execution_policy_hash,
     }
     actual = {key: details.get(key) for key in expected}
     actual["dependencies"] = current.get("dependencies")

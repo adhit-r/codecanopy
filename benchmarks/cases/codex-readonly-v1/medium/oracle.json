@@ -1,0 +1,1 @@
+{"findings":[{"category":"security","description":"untrusted entry names can escape the destination root","end_line":7,"file":"subject/archive.py","severity":"high","start_line":5},{"category":"correctness","description":"zero retries performs zero attempts instead of an initial attempt","end_line":2,"file":"subject/retry.py","severity":"medium","start_line":1}]}
