@@ -32,7 +32,12 @@ from runtime.providers import (
 )
 from runtime.safeio import open_private, read_regular_limited
 from runtime.tree import TreeNode, run_tree
-from benchmarks.model_routing import NodeSignal, RoutingConfig, route_node
+from benchmarks.model_routing import (
+    REASONING_EFFORTS,
+    NodeSignal,
+    RoutingConfig,
+    route_node,
+)
 
 try:  # ``fcntl`` is stdlib on the Unix hosts CodeCanopy currently supports.
     import fcntl
@@ -88,10 +93,25 @@ class ScheduleEntry:
 
 
 @dataclass(frozen=True)
+class PlannedInvocation:
+    node_id: str
+    requested_model: str
+    requested_reasoning_effort: str
+
+
+@dataclass(frozen=True)
+class ArmExecutionPlan:
+    case_id: str
+    arm: str
+    invocations: tuple[PlannedInvocation, ...]
+
+
+@dataclass(frozen=True)
 class BenchmarkSchedule:
     seed: int
     run_contract: RunContract
     cases: tuple[CaseSnapshot, ...]
+    execution_plans: tuple[ArmExecutionPlan, ...]
     entries: tuple[ScheduleEntry, ...]
 
 
@@ -146,15 +166,7 @@ def _validate_run_contract(contract: RunContract) -> None:
         raise ValueError("run contract timeout must be a positive finite number")
 
 
-def build_schedule(
-    seed: int,
-    run_contract: RunContract,
-    cases: Sequence[CaseSnapshot],
-) -> BenchmarkSchedule:
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        raise ValueError("benchmark seed must be an integer")
-    _validate_run_contract(run_contract)
-    case_snapshots = _validated_cases(cases)
+def _schedule_entries(seed: int) -> tuple[ScheduleEntry, ...]:
     random = Random(seed)
     entries: list[ScheduleEntry] = []
     for case_id in _CASE_IDS:
@@ -165,7 +177,41 @@ def build_schedule(
                 ScheduleEntry(len(entries), case_id, repetition, arm)
                 for arm in arms
             )
-    return BenchmarkSchedule(seed, run_contract, case_snapshots, tuple(entries))
+    return tuple(entries)
+
+
+def build_schedule(
+    seed: int,
+    run_contract: RunContract,
+    cases: Sequence[CaseSnapshot],
+    case_definitions: Sequence[CaseDefinition],
+    config: RoutingConfig,
+) -> BenchmarkSchedule:
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("benchmark seed must be an integer")
+    _validate_run_contract(run_contract)
+    case_snapshots = _validated_cases(cases)
+    if (
+        not isinstance(config, RoutingConfig)
+        or len(case_definitions) != len(_CASE_IDS)
+        or any(not isinstance(case, CaseDefinition) for case in case_definitions)
+    ):
+        raise ValueError("benchmark schedule requires fixed case definitions and routing config")
+    definitions = {case.case_id: case for case in case_definitions}
+    if set(definitions) != set(_CASE_IDS) or len(definitions) != len(case_definitions):
+        raise ValueError("benchmark schedule requires one definition for each fixed case")
+    execution_plans = tuple(
+        build_arm_execution_plan(definitions[case_id], arm, config)
+        for case_id in _CASE_IDS
+        for arm in ("sequential", "canopy")
+    )
+    return BenchmarkSchedule(
+        seed,
+        run_contract,
+        case_snapshots,
+        _validate_execution_plans(execution_plans),
+        _schedule_entries(seed),
+    )
 
 
 def append_result_record(path: str | Path, record: Mapping[str, object]) -> None:
@@ -216,7 +262,9 @@ def _exact_mapping(value: object, keys: set[str], label: str) -> Mapping[str, ob
 
 def _schedule_from_record(record: object) -> BenchmarkSchedule:
     row = _exact_mapping(
-        record, {"kind", "seed", "run_contract", "cases", "entries"}, "schedule"
+        record,
+        {"kind", "seed", "run_contract", "cases", "execution_plans", "entries"},
+        "schedule",
     )
     if row["kind"] != "schedule" or isinstance(row["seed"], bool) or not isinstance(row["seed"], int):
         raise ValueError("invalid benchmark schedule")
@@ -229,14 +277,44 @@ def _schedule_from_record(record: object) -> BenchmarkSchedule:
         "run contract",
     ))
     raw_cases = row["cases"]
+    raw_plans = row["execution_plans"]
     raw_entries = row["entries"]
-    if not isinstance(raw_cases, list) or not isinstance(raw_entries, list):
+    if (
+        not isinstance(raw_cases, list)
+        or not isinstance(raw_plans, list)
+        or not isinstance(raw_entries, list)
+    ):
         raise ValueError("invalid benchmark schedule")
     cases = tuple(CaseSnapshot(**_exact_mapping(
         case,
         {"case_id", "baseline", "subject_tree_hash", "case_definition_hash"},
         "case snapshot",
     )) for case in raw_cases)
+    plans: list[ArmExecutionPlan] = []
+    for raw_plan in raw_plans:
+        plan = _exact_mapping(
+            raw_plan, {"case_id", "arm", "invocations"}, "execution plan"
+        )
+        if (
+            not isinstance(plan["case_id"], str)
+            or not isinstance(plan["arm"], str)
+            or not isinstance(plan["invocations"], list)
+        ):
+            raise ValueError("invalid benchmark execution plan")
+        invocations: list[PlannedInvocation] = []
+        for raw_invocation in plan["invocations"]:
+            invocation = _exact_mapping(
+                raw_invocation,
+                {"node_id", "requested_model", "requested_reasoning_effort"},
+                "planned invocation",
+            )
+            if any(not isinstance(invocation[name], str) or not invocation[name]
+                   for name in invocation):
+                raise ValueError("invalid benchmark planned invocation")
+            invocations.append(PlannedInvocation(**invocation))
+        plans.append(ArmExecutionPlan(
+            plan["case_id"], plan["arm"], tuple(invocations)
+        ))
     entries: list[ScheduleEntry] = []
     for raw_entry in raw_entries:
         entry = _exact_mapping(
@@ -252,9 +330,14 @@ def _schedule_from_record(record: object) -> BenchmarkSchedule:
         ):
             raise ValueError("invalid benchmark schedule entry")
         entries.append(ScheduleEntry(**entry))
-    schedule = BenchmarkSchedule(row["seed"], contract, cases, tuple(entries))
-    expected = build_schedule(schedule.seed, schedule.run_contract, schedule.cases)
-    if schedule != expected:
+    schedule = BenchmarkSchedule(
+        row["seed"], contract, cases, tuple(plans), tuple(entries)
+    )
+    _validate_run_contract(schedule.run_contract)
+    if schedule.cases != _validated_cases(schedule.cases):
+        raise ValueError("invalid benchmark schedule")
+    _validate_execution_plans(schedule.execution_plans)
+    if schedule.entries != _schedule_entries(schedule.seed):
         raise ValueError("invalid benchmark schedule")
     return schedule
 
@@ -543,6 +626,8 @@ def _score_from_record(value: object) -> Score | None:
         raise _arm_result_error()
     if row["accepted"] and (precision < 0.8 or recall < 0.8):
         raise _arm_result_error()
+    if not row["accepted"] and fn == 0 and precision >= 0.8 and recall >= 0.8:
+        raise _arm_result_error()
     # Matched severity identities are not persisted; fn == 0 already proves full coverage.
     return Score(tp, fp, fn, precision, recall, f1, row["accepted"])
 
@@ -568,6 +653,10 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
             or schedule.entries[entry.position] != entry
         ):
             raise _arm_result_error()
+        plan = next(
+            plan for plan in schedule.execution_plans
+            if (plan.case_id, plan.arm) == (entry.case_id, entry.arm)
+        )
         raw_invocations = row["invocations"]
         if not isinstance(raw_invocations, list):
             raise _arm_result_error()
@@ -581,11 +670,28 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
         critical = _arm_int(row["critical_path_nodes"])
         node_ids = tuple(invocation.node_id for invocation in invocations)
         receipts = tuple(invocation.receipt for invocation in invocations)
+        planned_sequence = tuple(
+            (
+                item.node_id,
+                item.requested_model,
+                item.requested_reasoning_effort,
+            )
+            for item in plan.invocations
+        )
+        observed_sequence = tuple(
+            (
+                item.node_id,
+                item.requested_model,
+                item.requested_reasoning_effort,
+            )
+            for item in invocations
+        )
         slug = f"{entry.position:03d}-{entry.case_id}-{entry.arm}"
         if (
-            planned < 1
+            planned != len(plan.invocations)
             or executed != len(invocations)
             or executed > planned
+            or observed_sequence != planned_sequence[:executed]
             or pruned != planned - executed
             or failed != sum(invocation.status != "completed" for invocation in invocations)
             or not 1 <= critical <= planned
@@ -645,7 +751,14 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
             raise _arm_result_error()
         if completion_state == "incomplete" and not reasons:
             raise _arm_result_error()
-        if completion_state == "interrupted" and "interrupted" not in reasons:
+        interrupted_reason = "interrupted" in reasons
+        if (completion_state == "interrupted") != interrupted_reason:
+            raise _arm_result_error()
+        if completion_state == "interrupted" and (
+            score is not None
+            or (entry.arm == "sequential" and invocations)
+            or (entry.arm == "canopy" and "reviewer" in node_ids)
+        ):
             raise _arm_result_error()
         contract = schedule.run_contract
         contract_fields = (
@@ -753,6 +866,91 @@ class CaseDefinition:
     copy_manifest: tuple[str, ...]
     dag: tuple[DagNode, ...]
     oracle: tuple[Finding, ...]
+
+
+def build_arm_execution_plan(
+    case: CaseDefinition,
+    arm: str,
+    config: RoutingConfig,
+) -> ArmExecutionPlan:
+    if not isinstance(case, CaseDefinition) or not isinstance(config, RoutingConfig):
+        raise ValueError("execution plan requires a case definition and routing config")
+    if arm == "sequential":
+        settings = config.models["lead"]
+        invocations = (PlannedInvocation(
+            "lead", settings.model, settings.reasoning_effort
+        ),)
+    elif arm == "canopy":
+        planned = []
+        for node in case.dag:
+            decision = route_node(NodeSignal(
+                node.node_id, node.role, node.complexity_score, node.size_score
+            ), config)
+            planned.append(PlannedInvocation(
+                node.node_id, decision.model, decision.reasoning_effort
+            ))
+        reviewer = route_node(
+            NodeSignal("reviewer", "reviewer", 0.0, 0.0, requires_review=True),
+            config,
+        )
+        planned.append(PlannedInvocation(
+            "reviewer", reviewer.model, reviewer.reasoning_effort
+        ))
+        invocations = tuple(planned)
+    else:
+        raise ValueError("execution plan arm must be sequential or canopy")
+    if any(
+        not item.requested_model
+        or not item.requested_reasoning_effort
+        for item in invocations
+    ):
+        raise ValueError("execution plan settings must be non-empty")
+    return ArmExecutionPlan(case.case_id, arm, invocations)
+
+
+def _validate_execution_plans(
+    plans: Sequence[ArmExecutionPlan],
+) -> tuple[ArmExecutionPlan, ...]:
+    expected_keys = tuple(
+        (case_id, arm)
+        for case_id in _CASE_IDS
+        for arm in ("sequential", "canopy")
+    )
+    if (
+        len(plans) != len(expected_keys)
+        or any(not isinstance(plan, ArmExecutionPlan) for plan in plans)
+        or tuple((plan.case_id, plan.arm) for plan in plans) != expected_keys
+    ):
+        raise ValueError("invalid benchmark execution plans")
+    for plan in plans:
+        node_ids = tuple(item.node_id for item in plan.invocations)
+        if (
+            not plan.invocations
+            or len(set(node_ids)) != len(node_ids)
+            or any(
+                not isinstance(value, str) or not value
+                for item in plan.invocations
+                for value in (
+                    item.node_id,
+                    item.requested_model,
+                    item.requested_reasoning_effort,
+                )
+            )
+            or any(
+                item.requested_reasoning_effort not in REASONING_EFFORTS
+                for item in plan.invocations
+            )
+        ):
+            raise ValueError("invalid benchmark execution plan")
+        if plan.arm == "sequential" and node_ids != ("lead",):
+            raise ValueError("invalid benchmark sequential execution plan")
+        if plan.arm == "canopy" and (
+            len(node_ids) < 2
+            or node_ids[-1] != "reviewer"
+            or "lead" in node_ids
+        ):
+            raise ValueError("invalid benchmark canopy execution plan")
+    return tuple(plans)
 
 
 def _read_exact_limited(path: Path, limit: int) -> bytes:
@@ -1351,6 +1549,7 @@ def _validate_arm_inputs(
     config: RoutingConfig,
     contract: RunContract,
     snapshot: CaseSnapshot,
+    execution_plan: ArmExecutionPlan,
     expected_arm: str,
 ) -> None:
     if entry.arm != expected_arm or entry.case_id != case.case_id:
@@ -1360,6 +1559,9 @@ def _validate_arm_inputs(
     _validate_run_contract(contract)
     if snapshot.case_id != case.case_id:
         raise ValueError("case snapshot does not match case")
+    expected_plan = build_arm_execution_plan(case, expected_arm, config)
+    if execution_plan != expected_plan:
+        raise ValueError("execution plan does not match the pre-dispatch routing config")
 
 
 def _snapshot_reasons(
@@ -1391,6 +1593,7 @@ def run_sequential_arm(
     config: RoutingConfig,
     contract: RunContract,
     snapshot: CaseSnapshot,
+    execution_plan: ArmExecutionPlan,
     *,
     seed: int,
     state_root: Path,
@@ -1398,10 +1601,12 @@ def run_sequential_arm(
     capability: Callable[..., object] = provider_capability,
     results_path: Path | None = None,
 ) -> ArmRecord:
-    _validate_arm_inputs(case, entry, config, contract, snapshot, "sequential")
+    _validate_arm_inputs(
+        case, entry, config, contract, snapshot, execution_plan, "sequential"
+    )
     started = time.monotonic_ns()
     state_root = Path(state_root)
-    settings = config.models["lead"]
+    settings = execution_plan.invocations[0]
     baseline = snapshot.baseline
     tree_hash = snapshot.subject_tree_hash
     case_hash = canonical_case_definition_hash(case)
@@ -1422,8 +1627,8 @@ def run_sequential_arm(
             cwd=repo,
             allow_fallback=False,
             write_access=False,
-            model=settings.model,
-            reasoning_effort=settings.reasoning_effort,
+            model=settings.requested_model,
+            reasoning_effort=settings.requested_reasoning_effort,
         )
         receipt = state_root / "receipts" / _schedule_slug(entry) / "lead.jsonl"
         try:
@@ -1452,6 +1657,7 @@ def run_canopy_arm(
     config: RoutingConfig,
     contract: RunContract,
     snapshot: CaseSnapshot,
+    execution_plan: ArmExecutionPlan,
     *,
     seed: int,
     state_root: Path,
@@ -1459,10 +1665,12 @@ def run_canopy_arm(
     capability: Callable[..., object] = provider_capability,
     results_path: Path | None = None,
 ) -> ArmRecord:
-    _validate_arm_inputs(case, entry, config, contract, snapshot, "canopy")
+    _validate_arm_inputs(
+        case, entry, config, contract, snapshot, execution_plan, "canopy"
+    )
     started = time.monotonic_ns()
     state_root = Path(state_root)
-    planned_nodes = len(case.dag) + 1
+    planned_nodes = len(execution_plan.invocations)
     case_hash = canonical_case_definition_hash(case)
     baseline = snapshot.baseline
     tree_hash = snapshot.subject_tree_hash
@@ -1476,16 +1684,10 @@ def run_canopy_arm(
                 entry, seed, contract, baseline, tree_hash, case_hash,
                 time.monotonic_ns() - started, (), None, planned_nodes, 2, reasons,
             )
-        decisions = {
-            node.node_id: route_node(NodeSignal(
-                node.node_id, node.role, node.complexity_score, node.size_score
-            ), config)
-            for node in case.dag
-        }
+        planned_leaves = execution_plan.invocations[:-1]
+        reviewer = execution_plan.invocations[-1]
+        decisions = {item.node_id: item for item in planned_leaves}
         scopes = {node.node_id: frozenset(node.scope) for node in case.dag}
-        reviewer = route_node(
-            NodeSignal("reviewer", "reviewer", 0.0, 0.0, requires_review=True), config
-        )
         leaves = tuple(TreeNode(
             node_id=node.node_id,
             prompt=_prompt(case.task, node.scope),
@@ -1550,8 +1752,8 @@ def run_canopy_arm(
                 accept=accept_leaf,
                 allow_provider_fallback=False,
                 execution_settings=lambda node: (
-                    decisions[node.node_id].model,
-                    decisions[node.node_id].reasoning_effort,
+                    decisions[node.node_id].requested_model,
+                    decisions[node.node_id].requested_reasoning_effort,
                 ),
                 execution_policy_hash=contract.routing_config_hash,
             )
@@ -1598,8 +1800,8 @@ def run_canopy_arm(
                     cwd=reviewer_repo,
                     allow_fallback=False,
                     write_access=False,
-                    model=reviewer.model,
-                    reasoning_effort=reviewer.reasoning_effort,
+                    model=reviewer.requested_model,
+                    reasoning_effort=reviewer.requested_reasoning_effort,
                 )
                 try:
                     invocation, reviewer_parsed, _ = _invoke_direct(

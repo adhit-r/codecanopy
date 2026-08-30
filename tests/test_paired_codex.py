@@ -59,6 +59,13 @@ def fake_case_snapshots():
     )
 
 
+def fake_case_definitions():
+    return tuple(
+        paired_codex.load_case_definition(paired_codex.CASE_ROOT / case_id)
+        for case_id in ("small", "medium", "complex")
+    )
+
+
 def fake_routing_config():
     return RoutingConfig(
         strategy="weighted_complexity_size",
@@ -73,6 +80,20 @@ def fake_routing_config():
             "reviewer": ModelSettings("gpt-5.6-terra", "high"),
         },
     )
+
+
+def fake_schedule(seed=41):
+    return paired_codex.build_schedule(
+        seed,
+        fake_run_contract(),
+        fake_case_snapshots(),
+        fake_case_definitions(),
+        fake_routing_config(),
+    )
+
+
+def fake_execution_plan(case, arm):
+    return paired_codex.build_arm_execution_plan(case, arm, fake_routing_config())
 
 
 def completed_result(findings, *, marker=""):
@@ -112,15 +133,20 @@ def real_case_snapshot(case):
 def complete_arm_record(schedule):
     entry = schedule.entries[0]
     snapshot = next(case for case in schedule.cases if case.case_id == entry.case_id)
+    plan = next(
+        plan for plan in schedule.execution_plans
+        if (plan.case_id, plan.arm) == (entry.case_id, entry.arm)
+    )
+    planned = plan.invocations[0]
     invocation = paired_codex.InvocationRecord(
-        node_id="lead",
+        node_id=planned.node_id,
         requested_provider="codex",
         provider="codex",
         fallback_used=False,
         exit_code=0,
-        requested_model="gpt-5.6-sol",
-        requested_reasoning_effort="high",
-        actual_model="gpt-5.6-sol",
+        requested_model=planned.requested_model,
+        requested_reasoning_effort=planned.requested_reasoning_effort,
+        actual_model=planned.requested_model,
         status="completed",
         receipt=f"receipts/{entry.position:03d}-{entry.case_id}-{entry.arm}/lead.jsonl",
         output_hash="d" * 64,
@@ -167,20 +193,26 @@ def complete_canopy_record(schedule):
         if entry.case_id == "small" and entry.repetition == 1 and entry.arm == "canopy"
     )
     slug = f"{entry.position:03d}-{entry.case_id}-{entry.arm}"
+    plan = next(
+        plan for plan in schedule.execution_plans
+        if (plan.case_id, plan.arm) == (entry.case_id, entry.arm)
+    )
+    planned_leaf, planned_reviewer = plan.invocations
     leaf = replace(
         base.invocations[0],
-        node_id="percentage",
-        requested_model="gpt-5.6-luna",
-        requested_reasoning_effort="medium",
-        actual_model="gpt-5.6-luna",
-        receipt=f"receipts/{slug}/percentage.jsonl",
+        node_id=planned_leaf.node_id,
+        requested_model=planned_leaf.requested_model,
+        requested_reasoning_effort=planned_leaf.requested_reasoning_effort,
+        actual_model=planned_leaf.requested_model,
+        receipt=f"receipts/{slug}/{planned_leaf.node_id}.jsonl",
     )
     reviewer = replace(
         base.invocations[0],
-        node_id="reviewer",
-        requested_model="gpt-5.6-terra",
-        actual_model="gpt-5.6-terra",
-        receipt=f"receipts/{slug}/reviewer.jsonl",
+        node_id=planned_reviewer.node_id,
+        requested_model=planned_reviewer.requested_model,
+        requested_reasoning_effort=planned_reviewer.requested_reasoning_effort,
+        actual_model=planned_reviewer.requested_model,
+        receipt=f"receipts/{slug}/{planned_reviewer.node_id}.jsonl",
         output_hash="e" * 64,
     )
     return replace(
@@ -197,8 +229,10 @@ class PairedCodexTests(unittest.TestCase):
     def test_seeded_schedule_has_nine_pairs_and_eighteen_unique_positions(self):
         contract = fake_run_contract()
         cases = fake_case_snapshots()
-        first = paired_codex.build_schedule(41, contract, cases)
-        second = paired_codex.build_schedule(41, contract, cases)
+        definitions = fake_case_definitions()
+        config = fake_routing_config()
+        first = paired_codex.build_schedule(41, contract, cases, definitions, config)
+        second = paired_codex.build_schedule(41, contract, cases, definitions, config)
         self.assertEqual(first, second)
         self.assertEqual(18, len(first.entries))
         self.assertEqual(list(range(18)), [entry.position for entry in first.entries])
@@ -224,11 +258,49 @@ class PairedCodexTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             first.entries[0].arm = "changed"
 
+    def test_schedule_persists_exact_frozen_execution_plans(self):
+        schedule = fake_schedule()
+        small_sequential = next(
+            plan for plan in schedule.execution_plans
+            if (plan.case_id, plan.arm) == ("small", "sequential")
+        )
+        small_canopy = next(
+            plan for plan in schedule.execution_plans
+            if (plan.case_id, plan.arm) == ("small", "canopy")
+        )
+        self.assertEqual(
+            (("lead", "gpt-5.6-sol", "high"),),
+            tuple((item.node_id, item.requested_model, item.requested_reasoning_effort)
+                  for item in small_sequential.invocations),
+        )
+        self.assertEqual(
+            (("percentage", "gpt-5.6-luna", "medium"),
+             ("reviewer", "gpt-5.6-terra", "high")),
+            tuple((item.node_id, item.requested_model, item.requested_reasoning_effort)
+                  for item in small_canopy.invocations),
+        )
+        with self.assertRaises(FrozenInstanceError):
+            small_canopy.invocations[0].requested_model = "changed"
+        config = fake_routing_config()
+        frozen = paired_codex.build_schedule(
+            41, fake_run_contract(), fake_case_snapshots(), fake_case_definitions(), config
+        )
+        config.models["lead"] = ModelSettings("changed", "low")
+        sequential = next(
+            plan for plan in frozen.execution_plans
+            if (plan.case_id, plan.arm) == ("small", "sequential")
+        )
+        self.assertEqual("gpt-5.6-sol", sequential.invocations[0].requested_model)
+
     def test_schedule_requires_canonical_contract_and_exact_case_snapshots(self):
         contract = fake_run_contract()
         cases = fake_case_snapshots()
-        canonical = paired_codex.build_schedule(41, contract, cases)
-        reordered = paired_codex.build_schedule(41, contract, tuple(reversed(cases)))
+        definitions = fake_case_definitions()
+        config = fake_routing_config()
+        canonical = paired_codex.build_schedule(41, contract, cases, definitions, config)
+        reordered = paired_codex.build_schedule(
+            41, contract, tuple(reversed(cases)), definitions, config
+        )
         self.assertEqual(canonical, reordered)
         invalid_inputs = (
             (contract, cases[:-1]),
@@ -240,7 +312,9 @@ class PairedCodexTests(unittest.TestCase):
         for invalid_contract, invalid_cases in invalid_inputs:
             with self.subTest(contract=invalid_contract, cases=invalid_cases):
                 with self.assertRaises(ValueError):
-                    paired_codex.build_schedule(41, invalid_contract, invalid_cases)
+                    paired_codex.build_schedule(
+                        41, invalid_contract, invalid_cases, definitions, config
+                    )
 
     def test_result_record_is_canonical_private_and_durable(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -323,7 +397,7 @@ class PairedCodexTests(unittest.TestCase):
                     self.assertEqual(b"untouched", target.read_bytes())
 
     def test_result_loader_constructs_the_exact_first_schedule(self):
-        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        schedule = fake_schedule()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.jsonl"
             paired_codex.append_result_record(path, {"kind": "schedule", **asdict(schedule)})
@@ -331,8 +405,40 @@ class PairedCodexTests(unittest.TestCase):
         self.assertEqual(schedule, loaded)
         self.assertEqual((), records)
 
+    def test_result_loader_rejects_noncanonical_execution_plan_snapshots(self):
+        schedule = fake_schedule()
+        canonical = {"kind": "schedule", **asdict(schedule)}
+
+        def nested_junk(row):
+            row["execution_plans"][0]["invocations"][0]["junk"] = True
+
+        def reordered(row):
+            row["execution_plans"][0], row["execution_plans"][1] = (
+                row["execution_plans"][1], row["execution_plans"][0]
+            )
+
+        def unknown_effort(row):
+            row["execution_plans"][0]["invocations"][0][
+                "requested_reasoning_effort"
+            ] = "unbounded"
+
+        for name, mutate in (
+            ("nested_junk", nested_junk),
+            ("reordered", reordered),
+            ("unknown_effort", unknown_effort),
+        ):
+            row = json.loads(json.dumps(canonical))
+            mutate(row)
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(path, row)
+                with self.assertRaisesRegex(
+                    ValueError, "execution plan|planned invocation"
+                ):
+                    paired_codex.load_results(path)
+
     def test_result_loader_rejects_unknown_keys_and_later_schedule_rows(self):
-        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        schedule = fake_schedule()
         record = {"kind": "schedule", **asdict(schedule)}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.jsonl"
@@ -344,7 +450,7 @@ class PairedCodexTests(unittest.TestCase):
             self.assertEqual(original, path.read_bytes())
 
     def test_result_loader_reconstructs_nested_typed_arm_records(self):
-        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        schedule = fake_schedule()
         record = complete_arm_record(schedule)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.jsonl"
@@ -359,7 +465,7 @@ class PairedCodexTests(unittest.TestCase):
         self.assertIsInstance(loaded_records[0].score, paired_codex.Score)
 
     def test_result_loader_rejects_invalid_arm_rows_fail_closed(self):
-        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        schedule = fake_schedule()
         valid = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
 
         def extra_key(row):
@@ -403,7 +509,7 @@ class PairedCodexTests(unittest.TestCase):
                 self.assertEqual(original, path.read_bytes())
 
     def test_result_loader_rejects_impossible_normalized_arm_states(self):
-        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        schedule = fake_schedule()
         sequential = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
         canopy = {"kind": "arm-result", **asdict(complete_canopy_record(schedule))}
 
@@ -429,6 +535,23 @@ class PairedCodexTests(unittest.TestCase):
                 "accepted": True,
             }
 
+        def rejected_despite_complete_threshold_score(row):
+            row["score"]["accepted"] = False
+
+        def arbitrary_lead_settings(row):
+            row["invocations"][0]["requested_model"] = "gpt-5.6-luna"
+
+        def bogus_extra_canopy_leaf(row):
+            bogus = dict(row["invocations"][0])
+            bogus["node_id"] = "bogus"
+            bogus["receipt"] = (
+                f"receipts/{row['entry']['position']:03d}-{row['entry']['case_id']}-canopy/"
+                "bogus.jsonl"
+            )
+            row["invocations"].insert(-1, bogus)
+            row["planned_nodes"] = 3
+            row["executed_nodes"] = 3
+
         def noncanonical_receipt(row):
             row["invocations"][0]["receipt"] = "receipts/other/lead.jsonl"
 
@@ -453,9 +576,13 @@ class PairedCodexTests(unittest.TestCase):
             ("fallback_used", sequential, fallback_used),
             ("missing_actual_model_evidence", sequential, missing_actual_model_evidence),
             ("accepted_below_threshold", sequential, accepted_below_threshold),
+            ("rejected_despite_complete_threshold_score", sequential,
+             rejected_despite_complete_threshold_score),
+            ("arbitrary_lead_settings", sequential, arbitrary_lead_settings),
             ("noncanonical_receipt", sequential, noncanonical_receipt),
             ("failed_without_evidence", sequential, failed_without_evidence),
             ("duplicate_canopy_receipt", canopy, duplicate_canopy_receipt),
+            ("bogus_extra_canopy_leaf", canopy, bogus_extra_canopy_leaf),
             ("scored_canopy_without_reviewer", canopy, scored_canopy_without_reviewer),
             ("reviewer_not_last", canopy, reviewer_not_last),
         )
@@ -473,8 +600,99 @@ class PairedCodexTests(unittest.TestCase):
                     paired_codex.load_results(path)
                 self.assertEqual(original, path.read_bytes())
 
+    def test_rejected_score_with_nonzero_fn_remains_possible_without_severity_identities(self):
+        schedule = fake_schedule()
+        row = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
+        row["score"] = {
+            "tp": 4,
+            "fp": 0,
+            "fn": 1,
+            "precision": 1.0,
+            "recall": 0.8,
+            "f1": 2 * 1.0 * 0.8 / (1.0 + 0.8),
+            "accepted": False,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, {"kind": "schedule", **asdict(schedule)})
+            paired_codex.append_result_record(path, row)
+            _, records = paired_codex.load_results(path)
+        self.assertFalse(records[0].score.accepted)
+
+    def test_result_loader_preserves_only_legitimate_interrupted_prefixes(self):
+        schedule = fake_schedule()
+        sequential = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
+        sequential.update(
+            invocations=[],
+            score=None,
+            executed_nodes=0,
+            pruned_nodes=1,
+            completion_state="interrupted",
+            incomplete_reasons=["interrupted"],
+        )
+        canopy = {"kind": "arm-result", **asdict(complete_canopy_record(schedule))}
+        canopy.update(
+            invocations=canopy["invocations"][:1],
+            score=None,
+            executed_nodes=1,
+            pruned_nodes=1,
+            completion_state="interrupted",
+            incomplete_reasons=["interrupted"],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, {"kind": "schedule", **asdict(schedule)})
+            paired_codex.append_result_record(path, sequential)
+            paired_codex.append_result_record(path, canopy)
+            _, records = paired_codex.load_results(path)
+        self.assertEqual(("interrupted", "interrupted"), tuple(
+            record.completion_state for record in records
+        ))
+        self.assertEqual((0, 1), tuple(len(record.invocations) for record in records))
+
+    def test_result_loader_rejects_contradictory_interrupted_states(self):
+        schedule = fake_schedule()
+        sequential = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
+        canopy = {"kind": "arm-result", **asdict(complete_canopy_record(schedule))}
+
+        def incomplete_with_interrupted_reason(row):
+            row.update(
+                invocations=[], score=None, executed_nodes=0, pruned_nodes=1,
+                completion_state="incomplete", incomplete_reasons=["interrupted"],
+            )
+
+        def interrupted_completed_lead(row):
+            row.update(completion_state="interrupted", incomplete_reasons=["interrupted"])
+
+        def interrupted_completed_reviewer(row):
+            row.update(completion_state="interrupted", incomplete_reasons=["interrupted"])
+
+        def interrupted_canopy_with_reviewer_no_score(row):
+            row.update(
+                score=None, completion_state="interrupted", incomplete_reasons=["interrupted"]
+            )
+
+        for name, template, mutate in (
+            ("incomplete_with_interrupted_reason", sequential,
+             incomplete_with_interrupted_reason),
+            ("interrupted_completed_lead", sequential, interrupted_completed_lead),
+            ("interrupted_completed_reviewer", canopy, interrupted_completed_reviewer),
+            ("interrupted_canopy_with_reviewer_no_score", canopy,
+             interrupted_canopy_with_reviewer_no_score),
+        ):
+            row = json.loads(json.dumps(template))
+            mutate(row)
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(
+                    path, {"kind": "schedule", **asdict(schedule)}
+                )
+                paired_codex.append_result_record(path, row)
+                with self.assertRaisesRegex(ValueError, "arm result"):
+                    paired_codex.load_results(path)
+
     def test_result_loader_rejects_boolean_schedule_positions(self):
-        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        schedule = fake_schedule()
         record = {"kind": "schedule", **asdict(schedule)}
         record["entries"][0]["position"] = False
         with tempfile.TemporaryDirectory() as directory:
@@ -882,6 +1100,7 @@ class PairedCodexTests(unittest.TestCase):
                 fake_routing_config(),
                 fake_run_contract(),
                 snapshot,
+                fake_execution_plan(case, "sequential"),
                 seed=41,
                 state_root=state_root,
                 execute=execute,
@@ -922,6 +1141,7 @@ class PairedCodexTests(unittest.TestCase):
                 fake_routing_config(),
                 fake_run_contract(),
                 snapshot,
+                fake_execution_plan(case, "canopy"),
                 seed=41,
                 state_root=state_root,
                 execute=lambda request: requests.append(request) or completed_result(findings),
@@ -955,6 +1175,7 @@ class PairedCodexTests(unittest.TestCase):
                 fake_routing_config(),
                 fake_run_contract(),
                 real_case_snapshot(case),
+                fake_execution_plan(case, "canopy"),
                 seed=41,
                 state_root=state_root,
                 execute=lambda request: calls.append(request) or failed,
@@ -989,6 +1210,7 @@ class PairedCodexTests(unittest.TestCase):
                     fake_routing_config(),
                     fake_run_contract(),
                     real_case_snapshot(case),
+                    fake_execution_plan(case, "canopy"),
                     seed=41,
                     state_root=Path(directory),
                     execute=lambda request: calls.append(request) or result,
@@ -1025,6 +1247,7 @@ class PairedCodexTests(unittest.TestCase):
                 fake_routing_config(),
                 fake_run_contract(),
                 real_case_snapshot(case),
+                fake_execution_plan(case, "canopy"),
                 seed=41,
                 state_root=Path(directory),
                 execute=lambda request: requests.append(request) or next(results),
@@ -1059,6 +1282,7 @@ class PairedCodexTests(unittest.TestCase):
                     fake_routing_config(),
                     fake_run_contract(),
                     real_case_snapshot(case),
+                    fake_execution_plan(case, "canopy"),
                     seed=41,
                     state_root=Path(directory),
                     execute=lambda request: requests.append(request) or incomplete,
@@ -1103,6 +1327,7 @@ class PairedCodexTests(unittest.TestCase):
                 fake_routing_config(),
                 fake_run_contract(),
                 real_case_snapshot(case),
+                fake_execution_plan(case, "canopy"),
                 seed=41,
                 state_root=Path(directory),
                 execute=lambda request: requests.append(request) or completed_result(finding),
@@ -1123,6 +1348,7 @@ class PairedCodexTests(unittest.TestCase):
                     fake_routing_config(),
                     fake_run_contract(),
                     real_case_snapshot(case),
+                    fake_execution_plan(case, "sequential"),
                     seed=41,
                     state_root=root,
                     results_path=results,
