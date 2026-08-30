@@ -172,6 +172,26 @@ class ProviderTests(unittest.TestCase):
         self.assertLessEqual(len(completed.stdout.encode("utf-8")), providers.MAX_PROVIDER_OUTPUT_BYTES)
         self.assertIn("output exceeded", completed.stderr)
 
+    def test_provider_streams_are_closed_after_capture(self) -> None:
+        original_popen = subprocess.Popen
+        processes = []
+
+        def capture_process(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(providers.subprocess, "Popen", side_effect=capture_process):
+            providers._run_bounded(
+                (sys.executable, "-c", "print('done')"),
+                cwd=None,
+                env=os.environ.copy(),
+                timeout=5,
+            )
+
+        self.assertTrue(processes[0].stdout.closed)
+        self.assertTrue(processes[0].stderr.closed)
+
     def test_worktree_rejects_path_traversal_before_running_git(self) -> None:
         runner = Mock()
         with tempfile.TemporaryDirectory() as directory:
@@ -185,6 +205,7 @@ class ProviderTests(unittest.TestCase):
             target = providers.prepare_isolated_worktree(".", directory, "worker-a", runner=runner)
             self.assertEqual(target.parent, Path(directory).resolve())
         self.assertIn("--detach", runner.call_args.args[0])
+        self.assertEqual(providers.GIT_OPERATION_TIMEOUT_SECONDS, runner.call_args.kwargs["timeout"])
 
     def test_recovery_can_reuse_only_the_expected_registered_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

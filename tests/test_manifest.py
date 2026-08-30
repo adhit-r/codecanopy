@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from runtime.manifest import INVALIDATION_RULE, MAX_MANIFEST_BYTES, ManifestError, ManifestStore
 
@@ -124,6 +125,30 @@ class ManifestStoreTests(unittest.TestCase):
             os.close(descriptor)
         with self.assertRaisesRegex(ManifestError, "size limit"):
             ManifestStore(oversized).snapshot("run-1")
+
+    def test_append_rejects_the_event_after_the_limit(self):
+        original = self.path.read_bytes()
+        with patch("runtime.manifest.MAX_MANIFEST_EVENTS", 1):
+            with self.assertRaisesRegex(ManifestError, "event limit"):
+                self.store.record_node("run-1", "too-late", state="ready")
+        self.assertEqual(original, self.path.read_bytes())
+        self.assertEqual("planned", self.store.snapshot("run-1")["state"])
+
+    def test_read_only_private_manifest_can_be_inspected_without_mutation(self):
+        os.chmod(self.path, 0o400)
+
+        snapshot = ManifestStore(self.path).snapshot("run-1")
+
+        self.assertEqual("planned", snapshot["state"])
+        self.assertEqual(0o400, self.path.stat().st_mode & 0o777)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO files are not supported")
+    def test_manifest_rejects_fifo_without_blocking(self):
+        fifo = Path(self.directory.name) / "manifest.fifo"
+        os.mkfifo(fifo, 0o600)
+
+        with self.assertRaisesRegex(ManifestError, "not a regular file"):
+            ManifestStore(fifo).snapshot("run-1")
 
 
 if __name__ == "__main__":

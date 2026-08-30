@@ -7,14 +7,14 @@ Keep releases small, reproducible, and honest about what is locally verified.
 From a clean checkout, run:
 
 ```bash
-python3 /Users/adhi/.codex/skills/.system/skill-creator/scripts/quick_validate.py plugins/code-canopy/skills/code-canopy
-python3 /Users/adhi/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/code-canopy
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/code-canopy/skills/code-canopy
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/code-canopy
 python3 -m unittest discover -s tests -v
 python3 benchmarks/model_routing.py
 git diff --check
 ```
 
-The absolute validator paths are for the local Codex installation. CI runs the
+The validator paths use the configured `CODEX_HOME`, or the default local Codex installation. CI runs the
 repository-owned tests, benchmark, metadata checks, Pages smoke check, and
 whitespace check.
 

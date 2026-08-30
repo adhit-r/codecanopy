@@ -71,6 +71,7 @@ DEFAULT_COMMANDS: Mapping[ProviderName, tuple[str, ...]] = {
 MAX_PROMPT_CHARS = 32_768
 MAX_TIMEOUT_SECONDS = 900
 MAX_PROVIDER_OUTPUT_BYTES = 1024 * 1024
+GIT_OPERATION_TIMEOUT_SECONDS = 30
 _SAFE_ENVIRONMENT = frozenset(
     {
         "PATH",
@@ -296,6 +297,7 @@ def prepare_isolated_worktree(
         check=True,
         text=True,
         capture_output=True,
+        timeout=GIT_OPERATION_TIMEOUT_SECONDS,
     )
     return target
 
@@ -459,45 +461,52 @@ def _run_bounded(
     streams = selectors.DefaultSelector()
     output = bytearray()
     error = bytearray()
-    for stream, target in ((process.stdout, output), (process.stderr, error)):
-        if stream is not None:
-            os.set_blocking(stream.fileno(), False)
-            streams.register(stream, selectors.EVENT_READ, target)
-    deadline = time.monotonic() + timeout
-    exceeded = False
-    while streams.get_map():
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            _terminate_process(process)
-            raise subprocess.TimeoutExpired(command, timeout, bytes(output), bytes(error))
-        for key, _ in streams.select(min(remaining, 0.1)):
-            chunk = os.read(key.fileobj.fileno(), 64 * 1024)
-            if not chunk:
-                streams.unregister(key.fileobj)
-                continue
-            used = len(output) + len(error)
-            available = MAX_PROVIDER_OUTPUT_BYTES - used
-            if available > 0:
-                key.data.extend(chunk[:available])
-            if len(chunk) > available:
-                exceeded = True
+    try:
+        for stream, target in ((process.stdout, output), (process.stderr, error)):
+            if stream is not None:
+                os.set_blocking(stream.fileno(), False)
+                streams.register(stream, selectors.EVENT_READ, target)
+        deadline = time.monotonic() + timeout
+        exceeded = False
+        while streams.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 _terminate_process(process)
-        if exceeded and process.poll() is not None:
-            break
-    if process.poll() is None:
-        try:
-            process.wait(timeout=max(0, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            _terminate_process(process)
-            raise subprocess.TimeoutExpired(command, timeout, bytes(output), bytes(error))
-    if exceeded:
-        error.extend(b"\nprovider output exceeded 1048576 bytes")
-    return subprocess.CompletedProcess(
-        command,
-        125 if exceeded else process.returncode,
-        output.decode("utf-8", errors="replace"),
-        error.decode("utf-8", errors="replace"),
-    )
+                raise subprocess.TimeoutExpired(command, timeout, bytes(output), bytes(error))
+            for key, _ in streams.select(min(remaining, 0.1)):
+                chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                if not chunk:
+                    streams.unregister(key.fileobj)
+                    key.fileobj.close()
+                    continue
+                used = len(output) + len(error)
+                available = MAX_PROVIDER_OUTPUT_BYTES - used
+                if available > 0:
+                    key.data.extend(chunk[:available])
+                if len(chunk) > available:
+                    exceeded = True
+                    _terminate_process(process)
+            if exceeded and process.poll() is not None:
+                break
+        if process.poll() is None:
+            try:
+                process.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                _terminate_process(process)
+                raise subprocess.TimeoutExpired(command, timeout, bytes(output), bytes(error))
+        if exceeded:
+            error.extend(b"\nprovider output exceeded 1048576 bytes")
+        return subprocess.CompletedProcess(
+            command,
+            125 if exceeded else process.returncode,
+            output.decode("utf-8", errors="replace"),
+            error.decode("utf-8", errors="replace"),
+        )
+    finally:
+        streams.close()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
 
 
 def _terminate_process(process: subprocess.Popen[bytes]) -> None:

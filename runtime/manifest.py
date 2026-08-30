@@ -278,6 +278,8 @@ class ManifestStore:
             try:
                 handle.seek(0)
                 sequence = self._last_sequence(handle) + 1
+                if sequence > MAX_MANIFEST_EVENTS:
+                    raise ManifestError("manifest event limit exceeded")
                 row = {"seq": sequence, **event}
                 serialized = json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
                 encoded_size = len(serialized.encode("utf-8"))

@@ -18,8 +18,8 @@ def open_private(path: str | Path, *, append: bool) -> TextIO:
     """Open one owner-only regular file without following a final symlink."""
     target = private_path(path)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    flags = os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
-    flags |= os.O_RDWR
+    flags = os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags |= os.O_RDWR if append else os.O_RDONLY
     if append:
         flags |= os.O_APPEND | os.O_CREAT
     try:
@@ -34,7 +34,10 @@ def open_private(path: str | Path, *, append: bool) -> TextIO:
             raise ValueError(f"state file is not owned by the current user: {target}")
         if metadata.st_nlink != 1:
             raise ValueError(f"state file has multiple hard links: {target}")
-        os.fchmod(descriptor, 0o600)
+        if append:
+            os.fchmod(descriptor, 0o600)
+        elif stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise ValueError(f"state file permissions are not private: {target}")
         return os.fdopen(descriptor, "a+" if append else "r", encoding="utf-8")
     except Exception:
         os.close(descriptor)
