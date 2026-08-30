@@ -116,6 +116,17 @@ class ManifestStoreTests(unittest.TestCase):
             ManifestStore(link).create_run("unsafe")
         self.assertEqual("untouched", target.read_text(encoding="utf-8"))
 
+    def test_manifest_rejects_a_symlinked_parent_directory(self):
+        outside = Path(self.directory.name) / "outside"
+        outside.mkdir()
+        linked_parent = Path(self.directory.name) / "linked-parent"
+        linked_parent.symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaisesRegex(ManifestError, "unsafe state file"):
+            ManifestStore(linked_parent / "run.jsonl").create_run("unsafe-parent")
+
+        self.assertFalse((outside / "run.jsonl").exists())
+
     def test_oversized_manifest_is_rejected_before_parsing(self):
         oversized = Path(self.directory.name) / "oversized.jsonl"
         descriptor = os.open(oversized, os.O_WRONLY | os.O_CREAT, 0o600)
@@ -137,6 +148,29 @@ class ManifestStoreTests(unittest.TestCase):
         self.path.write_text(json.dumps(oversized_row) + "\n", encoding="utf-8")
 
         with self.assertRaisesRegex(ManifestError, "event size limit"):
+            ManifestStore(self.path).snapshot("run-1")
+
+    def test_append_rejects_an_oversized_event_with_the_event_size_error(self):
+        original = self.path.read_bytes()
+        with self.assertRaisesRegex(ManifestError, "event size limit"):
+            self.store.record_node("run-1", "oversized", padding="x" * MAX_EVENT_BYTES)
+        self.assertEqual(original, self.path.read_bytes())
+
+    def test_malformed_invalidation_event_fails_with_manifest_error(self):
+        self.store.record_node("run-1", "source", state="ready")
+        self.store.record_node("run-1", "affected", parent_id="source", state="ready")
+        rows = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+        rows.append(
+            {
+                "seq": len(rows) + 1,
+                "kind": "node-invalidated",
+                "run_id": "run-1",
+                "node_id": "affected",
+            }
+        )
+        self.path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ManifestError, "invalid node-invalidated event"):
             ManifestStore(self.path).snapshot("run-1")
 
     def test_append_rejects_the_event_after_the_limit(self):

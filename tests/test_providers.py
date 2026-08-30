@@ -22,22 +22,22 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", runner.call_args.kwargs["env"])
 
     def test_claude_fallback_fails_closed_by_default(self) -> None:
-        runner = Mock()
-        result = providers.execute_provider(
-            providers.ProviderRequest("do work", preferred_provider="claude"),
-            which=lambda name: "/bin/codex" if name == "codex" else None,
-            runner=runner,
-        )
+        with patch.object(providers, "_run_bounded") as runner:
+            result = providers.execute_provider(
+                providers.ProviderRequest("do work", preferred_provider="claude"),
+                which=lambda name: "/bin/codex" if name == "codex" else None,
+            )
         self.assertEqual((result.status, result.provider, result.fallback_used), ("unavailable", None, False))
         runner.assert_not_called()
 
     def test_claude_fallback_to_codex_requires_explicit_opt_in(self) -> None:
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
-        result = providers.execute_provider(
-            providers.ProviderRequest("do work", preferred_provider="claude", allow_fallback=True),
-            which=lambda name: "/bin/codex" if name == "codex" else None,
-            runner=runner,
-        )
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
+            result = providers.execute_provider(
+                providers.ProviderRequest("do work", preferred_provider="claude", allow_fallback=True),
+                which=lambda name: "/bin/codex" if name == "codex" else None,
+            )
         self.assertEqual((result.status, result.provider, result.fallback_used), ("completed", "codex", True))
         self.assertEqual(result.receipt_data["fallback_reason"], "preferred provider executable unavailable")
         command = runner.call_args.args[0]
@@ -45,16 +45,17 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(command[-1], providers.SECURITY_PREAMBLE + "do work")
 
     def test_timeout_returns_a_normalized_result(self) -> None:
-        result = providers.execute_provider(
-            providers.ProviderRequest("do work", timeout_seconds=2),
-            which=lambda _: "/bin/codex",
-            runner=Mock(side_effect=subprocess.TimeoutExpired("codex", 2)),
-        )
+        with patch.object(providers, "_run_bounded", side_effect=subprocess.TimeoutExpired("codex", 2)):
+            result = providers.execute_provider(
+                providers.ProviderRequest("do work", timeout_seconds=2),
+                which=lambda _: "/bin/codex",
+            )
         self.assertEqual((result.status, result.provider), ("timed_out", "codex"))
 
     def test_provider_environment_does_not_share_known_credentials(self) -> None:
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
-        with patch.dict(
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner, patch.dict(
             os.environ,
             {
                 "OPENAI_API_KEY": "openai",
@@ -69,7 +70,6 @@ class ProviderTests(unittest.TestCase):
             providers.execute_provider(
                 providers.ProviderRequest("do work", preferred_provider="claude"),
                 which=lambda name: "/bin/claude" if name == "claude" else None,
-                runner=runner,
             )
         environment = runner.call_args.kwargs["env"]
         self.assertNotIn("OPENAI_API_KEY", environment)
@@ -112,12 +112,13 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(row["timeout_seconds"], 7)
 
     def test_codex_write_access_is_explicit_and_sandboxed(self) -> None:
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
-        providers.execute_provider(
-            providers.ProviderRequest("do work", write_access=True),
-            which=lambda _: "/bin/codex",
-            runner=runner,
-        )
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
+            providers.execute_provider(
+                providers.ProviderRequest("do work", write_access=True),
+                which=lambda _: "/bin/codex",
+            )
         command = runner.call_args.args[0]
         self.assertIn("workspace-write", command)
         self.assertNotIn("danger-full-access", command)
@@ -130,34 +131,33 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("allow_login_shell=false", command)
 
     def test_claude_uses_plan_or_isolated_edit_permissions(self) -> None:
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
-        for write_access, expected in ((False, "plan"), (True, "acceptEdits")):
-            providers.execute_provider(
-                providers.ProviderRequest("do work", preferred_provider="claude", write_access=write_access),
-                which=lambda _: "/bin/claude",
-                runner=runner,
-            )
-            command = runner.call_args.args[0]
-            self.assertIn(expected, command)
-            self.assertIn("--safe-mode", command)
-            self.assertIn("--strict-mcp-config", command)
-            self.assertIn("--no-session-persistence", command)
-            self.assertIn("--no-chrome", command)
-            self.assertIn("--disable-slash-commands", command)
-            denied = command[command.index("--disallowedTools") + 1 : command.index("--tools")]
-            self.assertEqual(("WebFetch", "WebSearch", "mcp__*"), denied)
-            tools = command[command.index("--tools") + 1]
-            self.assertEqual("Read,Edit,Write,Grep,Glob" if write_access else "Read,Grep,Glob", tools)
-            self.assertNotIn("Bash", tools)
-            self.assertEqual("8", command[command.index("--max-turns") + 1])
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
+            for write_access, expected in ((False, "plan"), (True, "acceptEdits")):
+                providers.execute_provider(
+                    providers.ProviderRequest("do work", preferred_provider="claude", write_access=write_access),
+                    which=lambda _: "/bin/claude",
+                )
+                command = runner.call_args.args[0]
+                self.assertIn(expected, command)
+                self.assertIn("--safe-mode", command)
+                self.assertIn("--strict-mcp-config", command)
+                self.assertIn("--no-session-persistence", command)
+                self.assertIn("--no-chrome", command)
+                self.assertIn("--disable-slash-commands", command)
+                denied = command[command.index("--disallowedTools") + 1 : command.index("--tools")]
+                self.assertEqual(("WebFetch", "WebSearch", "mcp__*"), denied)
+                tools = command[command.index("--tools") + 1]
+                self.assertEqual("Read,Edit,Write,Grep,Glob" if write_access else "Read,Grep,Glob", tools)
+                self.assertNotIn("Bash", tools)
+                self.assertEqual("8", command[command.index("--max-turns") + 1])
 
     def test_request_limits_are_enforced_before_execution(self) -> None:
-        runner = Mock()
-        with self.assertRaises(ValueError):
+        with patch.object(providers, "_run_bounded") as runner, self.assertRaises(ValueError):
             providers.execute_provider(
                 providers.ProviderRequest("x" * (providers.MAX_PROMPT_CHARS + 1)),
                 which=lambda _: "/bin/codex",
-                runner=runner,
             )
         runner.assert_not_called()
 
@@ -266,6 +266,32 @@ class ProviderTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 providers.append_proof_receipt(receipt, request, result)
             self.assertEqual("untouched", target.read_text(encoding="utf-8"))
+
+    def test_receipt_append_rejects_the_event_after_the_limit(self) -> None:
+        request = providers.ProviderRequest("do work")
+        result = providers.ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "receipt.jsonl"
+            providers.append_proof_receipt(receipt, request, result)
+            original = receipt.read_bytes()
+            with patch.object(providers, "MAX_RECEIPT_EVENTS", 1), self.assertRaisesRegex(
+                ValueError, "event limit"
+            ):
+                providers.append_proof_receipt(receipt, request, result)
+            self.assertEqual(original, receipt.read_bytes())
+
+    def test_receipt_append_rejects_an_existing_oversized_file_before_scanning(self) -> None:
+        request = providers.ProviderRequest("do work")
+        result = providers.ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "receipt.jsonl"
+            receipt.write_bytes(b"x" * 9)
+            original = receipt.read_bytes()
+            with patch.object(providers, "MAX_RECEIPT_BYTES", 8), self.assertRaisesRegex(
+                ValueError, "size limit"
+            ):
+                providers.append_proof_receipt(receipt, request, result)
+            self.assertEqual(original, receipt.read_bytes())
 
 
 if __name__ == "__main__":

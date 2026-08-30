@@ -127,7 +127,8 @@ def run_tree(
         raise ManifestError("accepted manifest state cannot be resumed; start a new run after reviewing evidence")
 
     recovered = store.recover_interrupted(run_id)
-    store.set_run_state(run_id, "active")
+    if snapshot["state"] == "active":
+        store.set_run_state(run_id, "planned")
     snapshot = store.snapshot(run_id)
     known = set(snapshot["nodes"])
     resolved_baselines = {
@@ -153,6 +154,7 @@ def run_tree(
             timeout_seconds=node.timeout_seconds,
             worktree_name=node.worktree_name,
         )
+    store.set_run_state(run_id, "active")
     receipts = Path(receipt_dir) if receipt_dir else Path(manifest_path).parent / "receipts"
     summaries: dict[str, dict[str, object]] = {}
     for node in ordered:

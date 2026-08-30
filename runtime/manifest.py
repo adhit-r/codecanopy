@@ -283,7 +283,9 @@ class ManifestStore:
                 row = {"seq": sequence, **event}
                 serialized = json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
                 encoded_size = len(serialized.encode("utf-8"))
-                if encoded_size > MAX_EVENT_BYTES or os.fstat(handle.fileno()).st_size + encoded_size > MAX_MANIFEST_BYTES:
+                if encoded_size > MAX_EVENT_BYTES:
+                    raise ManifestError("manifest event size limit exceeded")
+                if os.fstat(handle.fileno()).st_size + encoded_size > MAX_MANIFEST_BYTES:
                     raise ManifestError("manifest size limit exceeded")
                 handle.seek(0, os.SEEK_END)
                 handle.write(serialized)
@@ -354,9 +356,22 @@ class ManifestStore:
                 node["checks"].append(row["check"])
             elif kind == "node-invalidated":
                 node = self._event_node(run, row)
+                source_node_id = row.get("source_node_id")
+                reason = row.get("reason")
+                rule = row.get("rule")
+                if (
+                    not isinstance(source_node_id, str)
+                    or source_node_id not in run["nodes"]
+                    or not isinstance(reason, str)
+                    or not reason
+                    or rule != INVALIDATION_RULE
+                ):
+                    raise ManifestError("invalid node-invalidated event")
                 self._require_transition(node["state"], "invalidated", NODE_TRANSITIONS, "node")
                 node["state"] = "invalidated"
-                node["invalidations"].append({key: row[key] for key in ("source_node_id", "reason", "rule")})
+                node["invalidations"].append(
+                    {"source_node_id": source_node_id, "reason": reason, "rule": rule}
+                )
             elif kind == "node-recovered":
                 node = self._event_node(run, row)
                 self._require_state(row.get("state"))

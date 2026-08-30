@@ -90,6 +90,19 @@ class MixedTreeTests(unittest.TestCase):
                     execute=lambda _request: self.fail("changed contract must not execute"),
                 )
 
+    def test_contract_validation_failure_does_not_mark_the_run_active(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "run.jsonl"
+            with self.assertRaisesRegex(ManifestError, "could not resolve immutable baseline"):
+                run_tree(
+                    [TreeNode("contract", "define", baseline="0" * 40)],
+                    manifest_path=manifest,
+                    run_id="invalid-contract",
+                    execute=lambda _request: self.fail("invalid contract must not execute"),
+                )
+
+            self.assertEqual("planned", ManifestStore(manifest).snapshot("invalid-contract")["state"])
+
     def test_default_baseline_is_materialized_as_a_commit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

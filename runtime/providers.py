@@ -21,6 +21,11 @@ from typing import Callable, Literal, Mapping
 
 from .safeio import open_private
 
+try:  # ``fcntl`` is stdlib on the Unix hosts CodeCanopy currently supports.
+    import fcntl
+except ImportError:  # pragma: no cover - retained for importability elsewhere.
+    fcntl = None
+
 
 ProviderName = Literal["codex", "claude"]
 ResultStatus = Literal["completed", "failed", "timed_out", "unavailable"]
@@ -71,6 +76,9 @@ DEFAULT_COMMANDS: Mapping[ProviderName, tuple[str, ...]] = {
 MAX_PROMPT_CHARS = 32_768
 MAX_TIMEOUT_SECONDS = 900
 MAX_PROVIDER_OUTPUT_BYTES = 1024 * 1024
+MAX_RECEIPT_BYTES = 4 * 1024 * 1024
+MAX_RECEIPT_EVENTS = 20_000
+MAX_RECEIPT_EVENT_BYTES = 64 * 1024
 GIT_OPERATION_TIMEOUT_SECONDS = 30
 _SAFE_ENVIRONMENT = frozenset(
     {
@@ -164,7 +172,6 @@ def execute_provider(
     request: ProviderRequest,
     *,
     which: Callable[[str], str | None] = shutil.which,
-    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> ProviderResult:
     """Run one local provider with bounded authority and explicit fallback."""
     _validate_provider(request.preferred_provider)
@@ -199,10 +206,7 @@ def execute_provider(
             "env": _provider_environment(selected),
             "timeout": request.timeout_seconds,
         }
-        if runner is None:
-            completed = _run_bounded(command, **arguments)
-        else:
-            completed = runner(command, capture_output=True, check=False, text=True, **arguments)
+        completed = _run_bounded(command, **arguments)
     except subprocess.TimeoutExpired:
         return _result(
             status="timed_out",
@@ -263,8 +267,30 @@ def append_proof_receipt(
         dispatched_prompt_hash=_hash(SECURITY_PREAMBLE + request.prompt),
         output_hash=_hash(result.output),
     )
+    serialized = json.dumps(receipt, sort_keys=True) + "\n"
+    encoded_size = len(serialized.encode("utf-8"))
+    if encoded_size > MAX_RECEIPT_EVENT_BYTES:
+        raise ValueError("proof receipt event size limit exceeded")
     with open_private(path, append=True) as handle:
-        handle.write(json.dumps(receipt, sort_keys=True) + "\n")
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            existing_size = os.fstat(handle.fileno()).st_size
+            if existing_size > MAX_RECEIPT_BYTES:
+                raise ValueError("proof receipt size limit exceeded")
+            handle.seek(0)
+            events = sum(1 for line in handle if line.strip())
+            if events >= MAX_RECEIPT_EVENTS:
+                raise ValueError("proof receipt event limit exceeded")
+            if existing_size + encoded_size > MAX_RECEIPT_BYTES:
+                raise ValueError("proof receipt size limit exceeded")
+            handle.seek(0, os.SEEK_END)
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def prepare_isolated_worktree(
