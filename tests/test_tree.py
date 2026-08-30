@@ -109,14 +109,21 @@ class MixedTreeTests(unittest.TestCase):
             return ProviderResult("completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {})
 
         with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "run.jsonl"
             result = run_tree(
                 [TreeNode("contract", "define", "codex")],
-                manifest_path=Path(directory) / "run.jsonl",
+                manifest_path=manifest,
                 run_id="returned",
                 execute=fake_execute,
             )
+            node_states = [
+                row["state"]
+                for row in map(json.loads, manifest.read_text(encoding="utf-8").splitlines())
+                if row["kind"] == "node-state"
+            ]
         self.assertEqual("returned", result["nodes"]["contract"]["status"])
         self.assertEqual("planned", result["state"])
+        self.assertEqual(["active", "returned"], node_states)
 
     def test_cli_status_and_inspect_read_manifest_without_running_provider(self):
         def fake_execute(request):

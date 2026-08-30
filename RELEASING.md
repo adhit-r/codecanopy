@@ -7,6 +7,7 @@ Keep releases small, reproducible, and honest about what is locally verified.
 From a clean checkout, run:
 
 ```bash
+python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/code-canopy/skills/code-canopy
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/code-canopy
 python3 -m unittest discover -s tests -v

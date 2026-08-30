@@ -199,8 +199,8 @@ def run_tree(
         accepted = result.status == "completed" and accept is not None and accept(node, result)
         if accepted:
             store.set_node_state(run_id, node.node_id, "accepted")
-        else:
-            store.set_node_state(run_id, node.node_id, "blocked" if result.status != "completed" else "returned")
+        elif result.status != "completed":
+            store.set_node_state(run_id, node.node_id, "blocked")
         summaries[node.node_id] = {
             "status": "accepted" if accepted else ("blocked" if result.status != "completed" else "returned"),
             "provider_status": result.status,

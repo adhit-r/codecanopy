@@ -23,6 +23,8 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
+      - name: Install pinned test dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -v
       - name: Run routing policy benchmark
