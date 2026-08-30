@@ -508,11 +508,7 @@ class PairedCodexTests(unittest.TestCase):
 
         def fake_runner(_case, entry, _config, _contract, _snapshot, _plan, **kwargs):
             calls.append(entry)
-            record = by_entry[entry]
-            paired_codex.append_result_record(
-                kwargs["results_path"], {"kind": "arm-result", **asdict(record)}
-            )
-            return record
+            return by_entry[entry]
 
         results = state_root / "acceptance.jsonl"
         output = io.StringIO()
@@ -530,12 +526,76 @@ class PairedCodexTests(unittest.TestCase):
                 "--state-dir", str(state_root), "--seed", "41",
             ])
         report = json.loads(output.getvalue())
+        loaded_schedule, loaded_records = paired_codex.load_results(results)
         self.assertEqual(0, status)
         self.assertEqual(list(schedule.entries[:2]), calls)
         self.assertEqual({"small"}, {entry.case_id for entry in calls})
+        self.assertEqual(schedule, loaded_schedule)
+        self.assertEqual(tuple(by_entry[entry] for entry in calls), loaded_records)
+        self.assertEqual(2, report["sample_count"])
+        self.assertEqual(
+            {
+                invocation.receipt
+                for record in loaded_records
+                for invocation in record.invocations
+            },
+            {
+                invocation.receipt
+                for entry in calls
+                for invocation in by_entry[entry].invocations
+            },
+        )
         self.assertFalse(report["publishable"])
         self.assertIn("all_nine_pairs_required", report["incomplete_reasons"])
         execute.assert_not_called()
+
+    def test_acceptance_does_not_double_append_runner_interrupt_evidence(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        first = next(record for record in records if record.entry == schedule.entries[0])
+        interrupted = replace(
+            first,
+            invocations=(),
+            score=None,
+            executed_nodes=0,
+            failed_nodes=0,
+            pruned_nodes=first.planned_nodes,
+            completion_state="interrupted",
+            incomplete_reasons=("interrupted",),
+        )
+        results = state_root / "interrupted-acceptance.jsonl"
+
+        def interrupting_runner(*_args, **kwargs):
+            paired_codex.append_result_record(
+                kwargs["results_path"],
+                {"kind": "arm-result", **asdict(interrupted)},
+            )
+            raise KeyboardInterrupt()
+
+        with patch.object(
+            paired_codex, "_build_command_schedule", return_value=(
+                schedule, fake_case_definitions(), fake_routing_config()
+            )
+        ), patch.object(
+            paired_codex, "run_sequential_arm", side_effect=interrupting_runner
+        ), self.assertRaises(KeyboardInterrupt):
+            paired_codex._acceptance_command(results, state_root, 41)
+        loaded_schedule, loaded_records = paired_codex.load_results(results)
+        self.assertEqual(schedule, loaded_schedule)
+        self.assertEqual((interrupted,), loaded_records)
+
+    def test_public_report_functions_fail_closed_on_non_arm_records(self):
+        schedule, _, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        malformed = object()
+        reasons = paired_codex.publication_gate(schedule, (malformed,), state_root)
+        report = paired_codex.calculate_report(
+            schedule, (malformed,), state_root=state_root
+        )
+        self.assertIn("malformed_result", reasons)
+        self.assertIn("malformed_result", report.incomplete_reasons)
+        self.assertFalse(report.publishable)
+        self.assertEqual(1, report.sample_count)
 
     def test_seeded_schedule_has_nine_pairs_and_eighteen_unique_positions(self):
         contract = fake_run_contract()

@@ -616,6 +616,7 @@ def publication_gate(
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     expected_entries = set(schedule.entries)
+    valid_records = tuple(record for record in records if isinstance(record, ArmRecord))
     grouped: dict[tuple[str, int], dict[str, list[ArmRecord]]] = {}
     for record in records:
         if not isinstance(record, ArmRecord) or record.entry not in expected_entries:
@@ -626,7 +627,9 @@ def publication_gate(
         ).setdefault(record.entry.arm, []).append(record)
         reasons.extend(_record_gate_reasons(schedule, record, Path(state_root)))
     for case_id in _CASE_IDS:
-        case_records = [record for record in records if record.entry.case_id == case_id]
+        case_records = [
+            record for record in valid_records if record.entry.case_id == case_id
+        ]
         for field, reason in (
             ("baseline", "baseline_changed_across_repetitions"),
             ("subject_tree_hash", "subject_tree_changed_across_repetitions"),
@@ -655,7 +658,7 @@ def publication_gate(
             reasons.extend(pair_reasons)
             if not pair_reasons:
                 complete_pairs += 1
-    if complete_pairs != 9 or len(records) != 18:
+    if complete_pairs != 9 or len(valid_records) != 18:
         reasons.append("all_nine_pairs_required")
     return tuple(dict.fromkeys(reasons))
 
@@ -693,11 +696,12 @@ def calculate_report(
     state_root: Path,
 ) -> BenchmarkReport:
     incomplete_reasons = publication_gate(schedule, records, Path(state_root))
+    valid_records = tuple(record for record in records if isinstance(record, ArmRecord))
     pairs: list[PairDelta] = []
     for case_id in _CASE_IDS:
         for repetition in range(1, 4):
             candidates = [
-                record for record in records
+                record for record in valid_records
                 if (record.entry.case_id, record.entry.repetition) == (case_id, repetition)
             ]
             sequential = [record for record in candidates if record.entry.arm == "sequential"]
@@ -2250,7 +2254,7 @@ def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
             if (item.case_id, item.arm) == (entry.case_id, entry.arm)
         )
         runner = run_sequential_arm if entry.arm == "sequential" else run_canopy_arm
-        runner(
+        record = runner(
             case,
             entry,
             config,
@@ -2260,6 +2264,9 @@ def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
             seed=seed,
             state_root=state_root,
             results_path=results,
+        )
+        append_result_record(
+            results, {"kind": "arm-result", **asdict(record)}
         )
     loaded_schedule, records = load_results(results)
     _print(asdict(calculate_report(loaded_schedule, records, state_root=state_root)))
