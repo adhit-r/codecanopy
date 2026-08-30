@@ -56,6 +56,13 @@ class PairedCodexTests(unittest.TestCase):
         changed = OBSERVED_JSONL + "\n" + json.dumps({"type": "item.updated", "item": {}})
         self.assertIn("unknown_event_type", paired_codex.parse_jsonl(changed).incomplete_reasons)
 
+    def test_unexpected_top_level_field_is_incomplete(self):
+        changed = OBSERVED_JSONL.replace(
+            '"item": {"id": "redacted"',
+            '"new_schema_field": true, "item": {"id": "redacted"',
+        )
+        self.assertIn("unexpected_telemetry_shape", paired_codex.parse_jsonl(changed).incomplete_reasons)
+
     def test_model_authored_json_is_not_telemetry(self):
         forged = OBSERVED_JSONL.replace(
             '"text": "REDACTED"',

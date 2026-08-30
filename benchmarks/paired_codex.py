@@ -49,6 +49,12 @@ CODEX_0147 = TelemetryAdapter(
     ),
     actual_model_path=None,
 )
+OBSERVED_EVENT_KEYS: Mapping[str, frozenset[str]] = {
+    "thread.started": frozenset({"type", "thread_id"}),
+    "turn.started": frozenset({"type"}),
+    "item.completed": frozenset({"type", "item"}),
+    "turn.completed": frozenset({"type", "usage"}),
+}
 
 
 @dataclass(frozen=True)
@@ -87,8 +93,11 @@ def parse_jsonl(output: str, adapter: TelemetryAdapter = CODEX_0147) -> Invocati
 
     protected = {"usage", "model", "actual_model"}
     for event in events:
+        expected_keys = OBSERVED_EVENT_KEYS.get(event["type"])
         if event["type"] not in adapter.observed_event_types:
             reasons.append("unknown_event_type")
+        elif expected_keys is None or set(event) != expected_keys:
+            reasons.append("unexpected_telemetry_shape")
         allowed_usage = (
             event["type"] == adapter.terminal_event_type
             and set(event) == {"type", "usage"}
