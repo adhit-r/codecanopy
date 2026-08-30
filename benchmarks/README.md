@@ -44,13 +44,13 @@ Compare quality through the same predeclared acceptance checks or blinded rubric
 
 ### Codex CLI local harness
 
-Probe the installed CLI before any execution:
+Print the frozen adapter/capability summary without execution:
 
 ```sh
 python3 benchmarks/paired_codex.py probe
 ```
 
-Run the owner-only small acceptance pair and inspect its local report with:
+Only `python3 benchmarks/paired_codex.py probe --execute` performs a live capability probe. Run the owner-only small acceptance pair for the approved real execution, then inspect its local report:
 
 ```sh
 python3 benchmarks/paired_codex.py acceptance --execute \
@@ -62,7 +62,7 @@ python3 benchmarks/paired_codex.py report \
   --state-dir .codecanopy/benchmarks/codex-readonly-v1-state
 ```
 
-The 2026-08-30 Codex CLI 0.147.0 probe exposed cumulative token usage but no actual-model identity. A requested model is not treated as an actual model. The full pilot and comparative chart are therefore blocked. Local small-pair wall-time, token, and deterministic-quality observations are incomplete evidence and must not be marketed as gains.
+The 2026-08-30 Codex CLI 0.147.0 live probe exposed cumulative token usage but no actual-model identity. A requested model is not treated as an actual model. The full pilot and comparative chart are therefore blocked. Local small-pair wall-time, token, and deterministic-quality observations are incomplete evidence and must not be marketed as gains.
 
 ## Publication gate
 
