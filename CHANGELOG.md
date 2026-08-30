@@ -6,8 +6,22 @@ durable multi-process recovery remain evidence-gated.
 
 ## [Unreleased]
 
-- Add release automation and additional integration checks as they become
-  accepted roadmap work.
+### Added
+
+- Define a user-authorized Codex app task surface for one independent branch per
+  task, root-mediated messaging, isolated ownership, and root-only acceptance.
+- Define artifact-based collaboration between Codex app tasks, local Codex and
+  Claude CLI nodes, and future allowlisted provider adapters without credential
+  or transcript sharing.
+- Add an evidence-gated paired benchmark contract for tokens, wall-clock time,
+  acceptance quality, critical paths, retries, conflicts, and actual
+  provider/model identities.
+
+### Changed
+
+- Clarify that the current routing fixture proves deterministic policy
+  conformance and tier distribution, not token savings, speed, model quality,
+  or globally shortest execution.
 
 ## [0.4.0] - 2026-08-30
 
