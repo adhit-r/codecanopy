@@ -12,6 +12,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
+REQUIRED_TIERS = frozenset({"worker", "expert", "lead", "reviewer"})
+
+
+@dataclass(frozen=True)
+class ModelSettings:
+    model: str
+    reasoning_effort: str
+
+
 @dataclass(frozen=True)
 class RoutingConfig:
     strategy: str
@@ -19,7 +29,7 @@ class RoutingConfig:
     size_weight: float
     worker_max_score: float
     expert_max_score: float
-    models: dict[str, str]
+    models: dict[str, ModelSettings]
 
 
 @dataclass(frozen=True)
@@ -36,6 +46,7 @@ class NodeSignal:
 class RoutingDecision:
     tier: str
     model: str
+    reasoning_effort: str
     score: float | None
     reason: str
 
@@ -44,10 +55,19 @@ def load_config(path: Path) -> RoutingConfig:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
     routing = data.get("routing", {})
-    models = {
-        tier: table.get("model", "")
-        for tier, table in data.get("models", {}).items()
-    }
+    model_tables = data.get("models", {})
+    if not isinstance(model_tables, dict) or set(model_tables) != REQUIRED_TIERS:
+        raise ValueError("models must define worker, expert, lead, and reviewer tiers")
+    models: dict[str, ModelSettings] = {}
+    for tier in sorted(REQUIRED_TIERS):
+        table = model_tables[tier]
+        model = table.get("model") if isinstance(table, dict) else None
+        effort = table.get("reasoning_effort") if isinstance(table, dict) else None
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"{tier} model must be a non-empty string")
+        if effort not in REASONING_EFFORTS:
+            raise ValueError(f"{tier} reasoning effort must be one of {sorted(REASONING_EFFORTS)}")
+        models[tier] = ModelSettings(model, effort)
     config = RoutingConfig(
         strategy=str(routing.get("strategy", "weighted_complexity_size")),
         complexity_weight=float(routing.get("complexity_weight", 0.6)),
@@ -98,7 +118,8 @@ def route_node(node: NodeSignal, config: RoutingConfig) -> RoutingDecision:
             tier, reason = "expert", "medium score"
         else:
             tier, reason = "lead", "complex score"
-    return RoutingDecision(tier, config.models.get(tier, "unconfigured"), score, reason)
+    settings = config.models[tier]
+    return RoutingDecision(tier, settings.model, settings.reasoning_effort, score, reason)
 
 
 CASES = (
@@ -129,7 +150,7 @@ def run(config: RoutingConfig) -> int:
         decision = route_node(node, config)
         assignments.append(decision.tier)
         score = "n/a" if decision.score is None else f"{decision.score:.2f}"
-        print(f"{node.name:28} score={score:>4} tier={decision.tier:8} model={decision.model}")
+        print(f"{node.name:28} score={score:>4} tier={decision.tier:8} model={decision.model} effort={decision.reasoning_effort}")
         if decision.tier != expected:
             failures.append(f"{node.name}: expected {expected}, got {decision.tier}")
     elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
