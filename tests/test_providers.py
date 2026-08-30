@@ -44,6 +44,36 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(command[0:6], ("/bin/codex", "exec", "--json", "--sandbox", "read-only", "--ephemeral"))
         self.assertEqual(command[-1], providers.SECURITY_PREAMBLE + "do work")
 
+    def test_codex_command_includes_trusted_model_and_effort_before_prompt(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"type":"turn.completed","usage":{}}\n', "")
+        with patch.object(providers, "_run_bounded", return_value=completed) as runner:
+            providers.execute_provider(
+                providers.ProviderRequest(
+                    "review",
+                    model="gpt-5.6-luna",
+                    reasoning_effort="medium",
+                ),
+                which=lambda _: "/bin/codex",
+            )
+        command = runner.call_args.args[0]
+        self.assertEqual("/bin/codex", command[0])
+        self.assertEqual("gpt-5.6-luna", command[command.index("--model") + 1])
+        self.assertIn('model_reasoning_effort="medium"', command)
+        self.assertEqual(providers.SECURITY_PREAMBLE + "review", command[-1])
+
+    def test_invalid_or_claude_model_settings_fail_before_execution(self) -> None:
+        requests = (
+            providers.ProviderRequest("review", model="../../escape"),
+            providers.ProviderRequest("review", reasoning_effort="fast"),
+            providers.ProviderRequest("review", preferred_provider="claude", model="claude"),
+            providers.ProviderRequest("review", preferred_provider="claude", reasoning_effort="high"),
+        )
+        for request in requests:
+            with self.subTest(request=request), patch.object(providers, "_run_bounded") as runner:
+                with self.assertRaises(ValueError):
+                    providers.execute_provider(request, which=lambda _: "/bin/provider")
+                runner.assert_not_called()
+
     def test_timeout_returns_a_normalized_result(self) -> None:
         with patch.object(providers, "_run_bounded", side_effect=subprocess.TimeoutExpired("codex", 2)):
             result = providers.execute_provider(
@@ -81,7 +111,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual("/usr/bin", environment["PATH"])
 
     def test_receipt_hashes_secrets_without_persisting_them(self) -> None:
-        request = providers.ProviderRequest("token=secret")
+        request = providers.ProviderRequest("token=secret", model="gpt-5.6-luna", reasoning_effort="medium")
         result = providers.ProviderResult("completed", "codex", "codex", False, 0, "answer=secret", None, {"leaked": "secret"})
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "receipt.jsonl"
@@ -96,6 +126,8 @@ class ProviderTests(unittest.TestCase):
         self.assertFalse(receipt_data["fallback_used"])
         self.assertEqual(receipt_data["exit_code"], 0)
         self.assertEqual(receipt_data["timeout_seconds"], 300)
+        self.assertEqual("gpt-5.6-luna", receipt_data["requested_model"])
+        self.assertEqual("medium", receipt_data["requested_reasoning_effort"])
 
     def test_receipt_uses_typed_result_fields_when_receipt_data_is_empty(self) -> None:
         request = providers.ProviderRequest("do work", preferred_provider="claude", timeout_seconds=7)
