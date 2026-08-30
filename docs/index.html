@@ -220,36 +220,57 @@ reasoning_effort = "high"</code></pre>
 
       <section class="benchmark" id="benchmark" aria-labelledby="benchmark-title">
         <div class="benchmark-intro">
-          <h2 id="benchmark-title">Configured tier selection is deterministic.</h2>
-          <p>The checked-in fixture scores complexity and size, applies safety overrides, and verifies the expected tier for ten fixed work shapes.</p>
-          <p class="benchmark-result"><strong>10/10 routes passed</strong><br><strong>3/3 invalid estimates rejected</strong><br><strong>6/10 non-lead fixture assignments</strong></p>
-          <p class="benchmark-note">These are policy-conformance results. Actual token change, wall-clock change, and acceptance-quality change have not yet been measured.</p>
+          <h2 id="benchmark-title">What the benchmark proves today.</h2>
+          <p>Routing behavior is verified against a fixed ten-case fixture. Comparative performance is not yet publishable.</p>
+          <div class="publication-status">
+            <strong>Publication gate</strong>
+            <span>Waiting for a complete Codex paired run with provider-reported usage and receipt-backed actual-model identity.</span>
+          </div>
+          <p class="benchmark-link"><a href="https://github.com/adhit-r/codecanopy/blob/main/benchmarks/README.md">Read the measurement contract</a></p>
         </div>
         <div class="benchmark-evidence">
-          <div class="routing-proof" aria-labelledby="routing-proof-title">
+          <div class="performance-board" aria-labelledby="performance-title">
             <div class="proof-heading">
-              <h3 id="routing-proof-title">Fixture assignments</h3>
-              <span>10 fixed cases</span>
+              <h3 id="performance-title">Comparative performance</h3>
+              <span>Current evidence state</span>
             </div>
-            <div class="routing-lane"><span>Worker</span><span class="routing-meter" aria-hidden="true"><i class="fill-worker"></i></span><strong>2/10</strong></div>
-            <div class="routing-lane"><span>Expert</span><span class="routing-meter" aria-hidden="true"><i class="fill-expert"></i></span><strong>3/10</strong></div>
-            <div class="routing-lane"><span>Lead</span><span class="routing-meter" aria-hidden="true"><i class="fill-lead"></i></span><strong>4/10</strong></div>
-            <div class="routing-lane"><span>Reviewer</span><span class="routing-meter" aria-hidden="true"><i class="fill-reviewer"></i></span><strong>1/10</strong></div>
+            <dl class="metric-readout">
+              <div class="metric-row">
+                <dt>Token delta</dt>
+                <dd class="metric-state">Not measured</dd>
+                <dd class="metric-explanation">Needs complete provider-reported usage for both arms.</dd>
+              </div>
+              <div class="metric-row">
+                <dt>Wall-clock delta</dt>
+                <dd class="metric-state">Not measured</dd>
+                <dd class="metric-explanation">Needs all nine matched pairs under the same time budget.</dd>
+              </div>
+              <div class="metric-row">
+                <dt>Acceptance quality</dt>
+                <dd class="metric-state">Not measured</dd>
+                <dd class="metric-explanation">Needs identical predeclared checks for both arms.</dd>
+              </div>
+            </dl>
           </div>
 
-          <div class="evidence-table" role="table" aria-label="Current CodeCanopy benchmark evidence">
+          <div class="proof-heading verified-heading">
+            <h3>Verified harness evidence</h3>
+            <span>Deterministic fixture</span>
+          </div>
+          <div class="evidence-table" role="table" aria-label="Verified CodeCanopy routing evidence">
             <div class="evidence-row evidence-head" role="row"><span role="columnheader">Metric</span><span role="columnheader">Observed</span></div>
             <div class="evidence-row" role="row"><span role="rowheader">Routing conformance</span><span role="cell">10/10 passed</span></div>
             <div class="evidence-row" role="row"><span role="rowheader">Invalid estimates</span><span role="cell">3/3 rejected</span></div>
             <div class="evidence-row" role="row"><span role="rowheader">Non-lead fixture assignments</span><span role="cell">6/10</span></div>
-            <div class="evidence-row evidence-unmeasured" role="row"><span role="rowheader">Token, time, and quality delta</span><span role="cell">Not measured</span></div>
           </div>
 
-          <div class="benchmark-method">
-            <h3>Comparative evidence starts with paired runs.</h3>
-            <p>The next benchmark holds the task, baseline, tools, permissions, and acceptance checks constant: one lead runs sequentially, then CodeCanopy runs the graph. It records provider-reported input and output tokens, root overhead, wall time, pass rate, retries, conflicts, node count, dispatch waves, and critical-path length across Codex-only, Claude-only, and authorized mixed-provider runs.</p>
-            <p><a href="https://github.com/adhit-r/codecanopy/blob/main/benchmarks/README.md">Read the benchmark contract</a></p>
+          <div class="protocol-strip">
+            <strong>Paired-run protocol</strong>
+            <span>3 task sizes × 3 repetitions × 2 arms</span>
+            <span>18 scheduled arm records / 9 required pairs</span>
+            <small>Schedule, not outcome.</small>
           </div>
+          <p class="benchmark-method">The executable harness is Codex-only and randomizes arm order. Claude-only and mixed-provider measurements remain future work.</p>
         </div>
       </section>
 
