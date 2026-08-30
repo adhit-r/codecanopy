@@ -1,6 +1,8 @@
 import io
 import json
 import os
+import stat
+from dataclasses import FrozenInstanceError, asdict, replace
 from pathlib import Path
 import shutil
 import subprocess
@@ -29,7 +31,220 @@ OBSERVED_JSONL = "\n".join((
 ))
 
 
+def fake_run_contract():
+    return paired_codex.RunContract(
+        benchmark_version="codex-readonly-v1",
+        scorer_version="finding-overlap-v1",
+        cli_version="codex-cli 0.147.0",
+        adapter_fingerprint="a" * 64,
+        routing_config_hash="b" * 64,
+        timeout_seconds=120,
+        sandbox="read-only",
+        acceptance_contract_hash="c" * 64,
+    )
+
+
+def fake_case_snapshots():
+    return tuple(
+        paired_codex.CaseSnapshot(
+            case_id,
+            baseline=str(index) * 40,
+            subject_tree_hash=str(index + 3) * 40,
+            case_definition_hash=str(index + 6) * 64,
+        )
+        for index, case_id in enumerate(("small", "medium", "complex"), 1)
+    )
+
+
 class PairedCodexTests(unittest.TestCase):
+    def test_seeded_schedule_has_nine_pairs_and_eighteen_unique_positions(self):
+        contract = fake_run_contract()
+        cases = fake_case_snapshots()
+        first = paired_codex.build_schedule(41, contract, cases)
+        second = paired_codex.build_schedule(41, contract, cases)
+        self.assertEqual(first, second)
+        self.assertEqual(18, len(first.entries))
+        self.assertEqual(list(range(18)), [entry.position for entry in first.entries])
+        pairs = {(entry.case_id, entry.repetition) for entry in first.entries}
+        self.assertEqual(9, len(pairs))
+        for pair in pairs:
+            self.assertEqual(
+                {"sequential", "canopy"},
+                {
+                    entry.arm
+                    for entry in first.entries
+                    if (entry.case_id, entry.repetition) == pair
+                },
+            )
+        with self.assertRaises(FrozenInstanceError):
+            first.entries[0].arm = "changed"
+
+    def test_schedule_requires_canonical_contract_and_exact_case_snapshots(self):
+        contract = fake_run_contract()
+        cases = fake_case_snapshots()
+        canonical = paired_codex.build_schedule(41, contract, cases)
+        reordered = paired_codex.build_schedule(41, contract, tuple(reversed(cases)))
+        self.assertEqual(canonical, reordered)
+        invalid_inputs = (
+            (contract, cases[:-1]),
+            (contract, (cases[0], cases[0], cases[2])),
+            (contract, (replace(cases[0], case_id=["small"]), *cases[1:])),
+            (contract, (replace(cases[0], baseline="not-a-hash"), *cases[1:])),
+            (replace(contract, routing_config_hash="not-a-hash"), cases),
+        )
+        for invalid_contract, invalid_cases in invalid_inputs:
+            with self.subTest(contract=invalid_contract, cases=invalid_cases):
+                with self.assertRaises(ValueError):
+                    paired_codex.build_schedule(41, invalid_contract, invalid_cases)
+
+    def test_result_record_is_canonical_private_and_durable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "private" / "results.jsonl"
+            paired_codex.append_result_record(path, {"z": 1, "a": "value"})
+            self.assertEqual(b'{"a":"value","z":1}\n', path.read_bytes())
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+
+    def test_result_limits_leave_existing_ledger_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, {"kind": "schedule", "entries": []})
+            original = path.read_bytes()
+            with patch.object(paired_codex, "MAX_RESULT_EVENTS", 1):
+                with self.assertRaisesRegex(ValueError, "event limit"):
+                    paired_codex.append_result_record(path, {"kind": "arm-result"})
+            self.assertEqual(original, path.read_bytes())
+
+    def test_result_rejects_preexisting_oversize_before_scanning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            path.write_bytes(b"x" * (paired_codex.MAX_RESULT_BYTES + 1))
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "size limit"):
+                paired_codex.append_result_record(path, {"kind": "arm-result"})
+            self.assertEqual(original, path.read_bytes())
+
+    def test_result_enforces_exact_event_size_boundary(self):
+        overhead = len(b'{"payload":""}\n')
+        exact = {"payload": "x" * (paired_codex.MAX_RESULT_EVENT_BYTES - overhead)}
+        oversized = {"payload": exact["payload"] + "x"}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, exact)
+            original = path.read_bytes()
+            self.assertEqual(paired_codex.MAX_RESULT_EVENT_BYTES, len(original))
+            with self.assertRaisesRegex(ValueError, "event size limit"):
+                paired_codex.append_result_record(path, oversized)
+            self.assertEqual(original, path.read_bytes())
+
+    def test_result_rejects_the_event_after_one_thousand_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            path.write_bytes(b'{}\n' * paired_codex.MAX_RESULT_EVENTS)
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "event limit"):
+                paired_codex.append_result_record(path, {"kind": "arm-result"})
+            self.assertEqual(original, path.read_bytes())
+
+    def test_result_rejects_symlinks_and_hard_links_without_changing_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for link_kind in ("symlink", "hardlink"):
+                with self.subTest(link_kind=link_kind):
+                    target = root / f"{link_kind}-target"
+                    target.write_bytes(b"untouched")
+                    result = root / f"{link_kind}-results.jsonl"
+                    if link_kind == "symlink":
+                        result.symlink_to(target)
+                    else:
+                        os.link(target, result)
+                    with self.assertRaises(ValueError):
+                        paired_codex.append_result_record(result, {"kind": "arm-result"})
+                    self.assertEqual(b"untouched", target.read_bytes())
+
+    def test_result_loader_constructs_the_exact_first_schedule(self):
+        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, {"kind": "schedule", **asdict(schedule)})
+            loaded, records = paired_codex.load_results(path)
+        self.assertEqual(schedule, loaded)
+        self.assertEqual((), records)
+
+    def test_result_loader_rejects_unknown_keys_and_later_schedule_rows(self):
+        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        record = {"kind": "schedule", **asdict(schedule)}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, record)
+            paired_codex.append_result_record(path, record)
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "schedule"):
+                paired_codex.load_results(path)
+            self.assertEqual(original, path.read_bytes())
+
+    def test_result_loader_rejects_boolean_schedule_positions(self):
+        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        record = {"kind": "schedule", **asdict(schedule)}
+        record["entries"][0]["position"] = False
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, record)
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "schedule entry"):
+                paired_codex.load_results(path)
+            self.assertEqual(original, path.read_bytes())
+            path.write_bytes(json.dumps({**record, "unknown": True}).encode() + b"\n")
+            path.chmod(0o600)
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "schedule"):
+                paired_codex.load_results(path)
+            self.assertEqual(original, path.read_bytes())
+
+    def test_receipt_auditor_requires_one_matching_output_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt = root / "receipts" / "000-small-sequential" / "lead.jsonl"
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({"output_hash": "a" * 64}) + "\n", encoding="utf-8")
+            receipt.chmod(0o600)
+            reference = receipt.relative_to(root).as_posix()
+            paired_codex.audit_proof_receipt(root, reference, "a" * 64)
+            with self.assertRaisesRegex(ValueError, "output hash"):
+                paired_codex.audit_proof_receipt(root, reference, "b" * 64)
+            receipt.write_text(receipt.read_text() * 2, encoding="utf-8")
+            original = receipt.read_bytes()
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                paired_codex.audit_proof_receipt(root, reference, "a" * 64)
+            self.assertEqual(original, receipt.read_bytes())
+
+    def test_receipt_auditor_rejects_unsafe_paths_links_and_oversize(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.jsonl"
+            target.write_text(json.dumps({"output_hash": "a" * 64}) + "\n", encoding="utf-8")
+            target.chmod(0o600)
+            for reference in ("/absolute.jsonl", "../parent.jsonl", "receipts\\backslash.jsonl"):
+                with self.subTest(reference=reference), self.assertRaises(ValueError):
+                    paired_codex.audit_proof_receipt(root, reference, "a" * 64)
+            for link_kind in ("symlink", "hardlink"):
+                with self.subTest(link_kind=link_kind):
+                    linked = root / f"{link_kind}.jsonl"
+                    if link_kind == "symlink":
+                        linked.symlink_to(target)
+                    else:
+                        os.link(target, linked)
+                    original = target.read_bytes()
+                    with self.assertRaises(ValueError):
+                        paired_codex.audit_proof_receipt(root, linked.name, "a" * 64)
+                    self.assertEqual(original, target.read_bytes())
+            oversized = root / "oversized.jsonl"
+            oversized.write_bytes(b"x" * (paired_codex.MAX_RECEIPT_EVENT_BYTES + 1))
+            oversized.chmod(0o600)
+            original = oversized.read_bytes()
+            with self.assertRaisesRegex(ValueError, "size limit"):
+                paired_codex.audit_proof_receipt(root, oversized.name, "a" * 64)
+            self.assertEqual(original, oversized.read_bytes())
+
     def test_model_finding_parser_normalizes_manifest_paths(self):
         case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
         parsed = paired_codex.parse_model_findings(json.dumps({"findings": [{

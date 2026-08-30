@@ -10,6 +10,7 @@ import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+from random import Random
 import subprocess
 import sys
 import tempfile
@@ -18,8 +19,18 @@ from typing import Mapping, Sequence
 if __package__ is None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from runtime.providers import ProviderRequest, execute_provider, provider_capability
-from runtime.safeio import read_regular_limited
+from runtime.providers import (
+    MAX_RECEIPT_EVENT_BYTES,
+    ProviderRequest,
+    execute_provider,
+    provider_capability,
+)
+from runtime.safeio import open_private, read_regular_limited
+
+try:  # ``fcntl`` is stdlib on the Unix hosts CodeCanopy currently supports.
+    import fcntl
+except ImportError:  # pragma: no cover - retained for importability elsewhere.
+    fcntl = None
 
 
 MAX_TOKEN_VALUE = 2**63 - 1
@@ -30,6 +41,267 @@ _MAX_SUBJECT_BYTES = 1_048_576
 _CATEGORIES = frozenset({"correctness", "reliability", "security"})
 _SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 MAX_MODEL_FINDINGS_BYTES = _CASE_LIMITS["oracle"]
+MAX_RESULT_BYTES = 4 * 1024 * 1024
+MAX_RESULT_EVENTS = 1_000
+MAX_RESULT_EVENT_BYTES = 64 * 1024
+_CASE_IDS = ("small", "medium", "complex")
+
+
+@dataclass(frozen=True)
+class RunContract:
+    benchmark_version: str
+    scorer_version: str
+    cli_version: str
+    adapter_fingerprint: str
+    routing_config_hash: str
+    timeout_seconds: float
+    sandbox: str
+    acceptance_contract_hash: str
+
+
+@dataclass(frozen=True)
+class CaseSnapshot:
+    case_id: str
+    baseline: str
+    subject_tree_hash: str
+    case_definition_hash: str
+
+
+@dataclass(frozen=True)
+class ScheduleEntry:
+    position: int
+    case_id: str
+    repetition: int
+    arm: str
+
+
+@dataclass(frozen=True)
+class BenchmarkSchedule:
+    seed: int
+    run_contract: RunContract
+    cases: tuple[CaseSnapshot, ...]
+    entries: tuple[ScheduleEntry, ...]
+
+
+def _hex_identity(value: object, lengths: set[int], label: str) -> None:
+    if (
+        not isinstance(value, str)
+        or len(value) not in lengths
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{label} must be a lowercase hexadecimal identity")
+
+
+def _validated_cases(cases: Sequence[CaseSnapshot]) -> tuple[CaseSnapshot, ...]:
+    if len(cases) != len(_CASE_IDS) or any(not isinstance(case, CaseSnapshot) for case in cases):
+        raise ValueError("benchmark schedule requires exactly three case snapshots")
+    if any(not isinstance(case.case_id, str) for case in cases):
+        raise ValueError("benchmark case ids must be strings")
+    by_id = {case.case_id: case for case in cases}
+    if set(by_id) != set(_CASE_IDS) or len(by_id) != len(cases):
+        raise ValueError("benchmark schedule requires one snapshot for each fixed case")
+    ordered = tuple(by_id[case_id] for case_id in _CASE_IDS)
+    for case in ordered:
+        _hex_identity(case.baseline, {40, 64}, "baseline")
+        _hex_identity(case.subject_tree_hash, {40, 64}, "subject tree hash")
+        _hex_identity(case.case_definition_hash, {64}, "case definition hash")
+    return ordered
+
+
+def _validate_run_contract(contract: RunContract) -> None:
+    if not isinstance(contract, RunContract):
+        raise ValueError("benchmark schedule requires a run contract")
+    for field in (
+        contract.benchmark_version,
+        contract.scorer_version,
+        contract.cli_version,
+        contract.sandbox,
+    ):
+        if not isinstance(field, str) or not field:
+            raise ValueError("run contract text fields must be non-empty strings")
+    for value, label in (
+        (contract.adapter_fingerprint, "adapter fingerprint"),
+        (contract.routing_config_hash, "routing config hash"),
+        (contract.acceptance_contract_hash, "acceptance contract hash"),
+    ):
+        _hex_identity(value, {64}, label)
+    if (
+        isinstance(contract.timeout_seconds, bool)
+        or not isinstance(contract.timeout_seconds, (int, float))
+        or not math.isfinite(contract.timeout_seconds)
+        or contract.timeout_seconds <= 0
+    ):
+        raise ValueError("run contract timeout must be a positive finite number")
+
+
+def build_schedule(
+    seed: int,
+    run_contract: RunContract,
+    cases: Sequence[CaseSnapshot],
+) -> BenchmarkSchedule:
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("benchmark seed must be an integer")
+    _validate_run_contract(run_contract)
+    case_snapshots = _validated_cases(cases)
+    random = Random(seed)
+    entries: list[ScheduleEntry] = []
+    for case_id in _CASE_IDS:
+        for repetition in range(1, 4):
+            arms = ["sequential", "canopy"]
+            random.shuffle(arms)
+            entries.extend(
+                ScheduleEntry(len(entries), case_id, repetition, arm)
+                for arm in arms
+            )
+    return BenchmarkSchedule(seed, run_contract, case_snapshots, tuple(entries))
+
+
+def append_result_record(path: str | Path, record: Mapping[str, object]) -> None:
+    if not isinstance(record, Mapping) or any(not isinstance(key, str) for key in record):
+        raise ValueError("benchmark result record must be a JSON object with string keys")
+    try:
+        serialized = json.dumps(
+            dict(record), sort_keys=True, separators=(",", ":"), allow_nan=False
+        ) + "\n"
+    except (TypeError, ValueError) as error:
+        raise ValueError("benchmark result record must be canonical JSON") from error
+    encoded_size = len(serialized.encode("utf-8"))
+    if encoded_size > MAX_RESULT_EVENT_BYTES:
+        raise ValueError("benchmark result event size limit exceeded")
+    with open_private(path, append=True) as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            existing_size = os.fstat(handle.fileno()).st_size
+            if existing_size > MAX_RESULT_BYTES:
+                raise ValueError("benchmark result size limit exceeded")
+            handle.seek(0)
+            events = sum(1 for line in handle if line.strip())
+            if events >= MAX_RESULT_EVENTS:
+                raise ValueError("benchmark result event limit exceeded")
+            if existing_size + encoded_size > MAX_RESULT_BYTES:
+                raise ValueError("benchmark result size limit exceeded")
+            handle.seek(0, os.SEEK_END)
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _exact_mapping(value: object, keys: set[str], label: str) -> Mapping[str, object]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"invalid benchmark {label}")
+    return value
+
+
+def _schedule_from_record(record: object) -> BenchmarkSchedule:
+    row = _exact_mapping(
+        record, {"kind", "seed", "run_contract", "cases", "entries"}, "schedule"
+    )
+    if row["kind"] != "schedule" or isinstance(row["seed"], bool) or not isinstance(row["seed"], int):
+        raise ValueError("invalid benchmark schedule")
+    contract = RunContract(**_exact_mapping(
+        row["run_contract"],
+        {
+            "benchmark_version", "scorer_version", "cli_version", "adapter_fingerprint",
+            "routing_config_hash", "timeout_seconds", "sandbox", "acceptance_contract_hash",
+        },
+        "run contract",
+    ))
+    raw_cases = row["cases"]
+    raw_entries = row["entries"]
+    if not isinstance(raw_cases, list) or not isinstance(raw_entries, list):
+        raise ValueError("invalid benchmark schedule")
+    cases = tuple(CaseSnapshot(**_exact_mapping(
+        case,
+        {"case_id", "baseline", "subject_tree_hash", "case_definition_hash"},
+        "case snapshot",
+    )) for case in raw_cases)
+    entries: list[ScheduleEntry] = []
+    for raw_entry in raw_entries:
+        entry = _exact_mapping(
+            raw_entry, {"position", "case_id", "repetition", "arm"}, "schedule entry"
+        )
+        if (
+            isinstance(entry["position"], bool)
+            or not isinstance(entry["position"], int)
+            or isinstance(entry["repetition"], bool)
+            or not isinstance(entry["repetition"], int)
+            or not isinstance(entry["case_id"], str)
+            or not isinstance(entry["arm"], str)
+        ):
+            raise ValueError("invalid benchmark schedule entry")
+        entries.append(ScheduleEntry(**entry))
+    schedule = BenchmarkSchedule(row["seed"], contract, cases, tuple(entries))
+    expected = build_schedule(schedule.seed, schedule.run_contract, schedule.cases)
+    if schedule != expected:
+        raise ValueError("invalid benchmark schedule")
+    return schedule
+
+
+def load_results(path: str | Path) -> tuple[BenchmarkSchedule, tuple[Mapping[str, object], ...]]:
+    with open_private(path, append=False) as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        try:
+            if os.fstat(handle.fileno()).st_size > MAX_RESULT_BYTES:
+                raise ValueError("benchmark result size limit exceeded")
+            payload = handle.read(MAX_RESULT_BYTES + 1)
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    if len(payload.encode("utf-8")) > MAX_RESULT_BYTES:
+        raise ValueError("benchmark result size limit exceeded")
+    lines = [line for line in payload.splitlines() if line.strip()]
+    if not lines or len(lines) > MAX_RESULT_EVENTS:
+        raise ValueError("benchmark result event limit exceeded")
+    rows: list[Mapping[str, object]] = []
+    for line in lines:
+        if len((line + "\n").encode("utf-8")) > MAX_RESULT_EVENT_BYTES:
+            raise ValueError("benchmark result event size limit exceeded")
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValueError("invalid benchmark result JSON") from error
+        if not isinstance(row, dict):
+            raise ValueError("benchmark result rows must be JSON objects")
+        rows.append(row)
+    schedule = _schedule_from_record(rows[0])
+    records: list[Mapping[str, object]] = []
+    for row in rows[1:]:
+        if row.get("kind") == "schedule":
+            raise ValueError("benchmark schedule must appear exactly once and first")
+        if row.get("kind") != "arm-result":
+            raise ValueError("invalid benchmark result kind")
+        records.append(row)
+    return schedule, tuple(records)
+
+
+def audit_proof_receipt(state_root: str | Path, reference: str, output_hash: str) -> None:
+    relative = _relative_path(reference)
+    if relative != reference:
+        raise ValueError("proof receipt reference must be canonical")
+    path = Path(state_root).joinpath(*PurePosixPath(relative).parts)
+    with open_private(path, append=False) as handle:
+        size = os.fstat(handle.fileno()).st_size
+        if size > MAX_RECEIPT_EVENT_BYTES:
+            raise ValueError("proof receipt size limit exceeded")
+        payload = handle.read(MAX_RECEIPT_EVENT_BYTES + 1)
+    if len(payload.encode("utf-8")) > MAX_RECEIPT_EVENT_BYTES:
+        raise ValueError("proof receipt size limit exceeded")
+    rows = [line for line in payload.splitlines() if line.strip()]
+    if len(rows) != 1:
+        raise ValueError("proof receipt must contain exactly one row")
+    try:
+        row = json.loads(rows[0])
+    except json.JSONDecodeError as error:
+        raise ValueError("invalid proof receipt JSON") from error
+    if not isinstance(row, dict):
+        raise ValueError("proof receipt row must be a JSON object")
+    if not isinstance(output_hash, str) or row.get("output_hash") != output_hash:
+        raise ValueError("proof receipt output hash mismatch")
 
 
 @dataclass(frozen=True)
