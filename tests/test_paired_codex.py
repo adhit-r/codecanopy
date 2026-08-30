@@ -30,6 +30,38 @@ OBSERVED_JSONL = "\n".join((
 
 
 class PairedCodexTests(unittest.TestCase):
+    def test_scorer_is_one_to_one_and_counts_duplicates_as_false_positives(self):
+        expected = (
+            paired_codex.Finding("subject/a.py", 10, 12, "security", "high", "expected"),
+        )
+        predicted = (
+            paired_codex.Finding("subject/a.py", 10, 10, "security", "high", "first"),
+            paired_codex.Finding("subject/a.py", 11, 11, "security", "high", "duplicate"),
+        )
+        score = paired_codex.score_findings(expected, predicted)
+        self.assertEqual((1, 1, 0), (score.tp, score.fp, score.fn))
+        self.assertEqual((0.5, 1.0, 2 / 3), (score.precision, score.recall, score.f1))
+        self.assertFalse(score.accepted)
+
+    def test_zero_predictions_scores_exactly_zero(self):
+        expected = (
+            paired_codex.Finding("subject/a.py", 1, 1, "correctness", "medium", "expected"),
+        )
+        score = paired_codex.score_findings(expected, ())
+        self.assertEqual((0, 0, 1, 0.0, 0.0, 0.0, False), (
+            score.tp, score.fp, score.fn, score.precision, score.recall, score.f1, score.accepted
+        ))
+
+    def test_unmatched_high_finding_blocks_acceptance(self):
+        expected = (
+            paired_codex.Finding("subject/a.py", 1, 1, "security", "high", "required"),
+            paired_codex.Finding("subject/b.py", 1, 1, "correctness", "low", "minor"),
+        )
+        predicted = (
+            paired_codex.Finding("subject/b.py", 1, 1, "correctness", "low", "found"),
+        )
+        self.assertFalse(paired_codex.score_findings(expected, predicted).accepted)
+
     def test_case_hash_binds_manifest_dag_and_oracle(self):
         case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
         original = paired_codex.canonical_case_definition_hash(case)

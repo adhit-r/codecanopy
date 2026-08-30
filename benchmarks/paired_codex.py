@@ -42,6 +42,57 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class Score:
+    tp: int
+    fp: int
+    fn: int
+    precision: float
+    recall: float
+    f1: float
+    accepted: bool
+
+
+def score_findings(expected: Sequence[Finding], predicted: Sequence[Finding]) -> Score:
+    unmatched = set(range(len(predicted)))
+    matched_expected: set[int] = set()
+    order = sorted(range(len(expected)), key=lambda index: (
+        expected[index].file,
+        expected[index].category,
+        expected[index].severity,
+        expected[index].start_line,
+        expected[index].end_line,
+    ))
+    for expected_index in order:
+        wanted = expected[expected_index]
+        eligible = [
+            index for index in unmatched
+            if predicted[index].file == wanted.file
+            and predicted[index].category == wanted.category
+            and predicted[index].severity == wanted.severity
+            and predicted[index].start_line <= wanted.end_line
+            and wanted.start_line <= predicted[index].end_line
+        ]
+        if eligible:
+            selected = min(eligible, key=lambda index: (
+                abs(predicted[index].start_line - wanted.start_line), index
+            ))
+            unmatched.remove(selected)
+            matched_expected.add(expected_index)
+    tp = len(matched_expected)
+    fp = len(predicted) - tp
+    fn = len(expected) - tp
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    required = {
+        index for index, finding in enumerate(expected)
+        if finding.severity in {"high", "critical"}
+    }
+    accepted = precision >= 0.8 and recall >= 0.8 and required <= matched_expected
+    return Score(tp, fp, fn, precision, recall, f1, accepted)
+
+
+@dataclass(frozen=True)
 class DagNode:
     node_id: str
     role: str
