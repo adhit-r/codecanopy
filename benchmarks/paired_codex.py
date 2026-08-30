@@ -1562,6 +1562,7 @@ def _benchmark_git_environment(control_root: Path) -> tuple[dict[str, str], Path
         "PATH": os.defpath,
         "HOME": str(home),
         "LC_ALL": "C",
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_SYSTEM": str(empty_config),
         "GIT_CONFIG_GLOBAL": str(empty_config),
@@ -1726,6 +1727,8 @@ def parse_jsonl(output: str, adapter: TelemetryAdapter = CODEX_0147) -> Invocati
             or not 0 <= candidate[field] <= MAX_TOKEN_VALUE
             for field in adapter.usage_fields
         ):
+            reasons.append("invalid_token_usage")
+        elif candidate["input_tokens"] + candidate["output_tokens"] > MAX_TOKEN_VALUE:
             reasons.append("invalid_token_usage")
         else:
             usage = {field: candidate[field] for field in adapter.usage_fields}

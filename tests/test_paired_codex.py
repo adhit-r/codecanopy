@@ -505,13 +505,18 @@ class PairedCodexTests(unittest.TestCase):
             (template / "provider-visible-template-data").write_text("hostile", encoding="utf-8")
             polluted = {
                 "HOME": str(root / "hostile-home"),
+                "GIT_ATTR_NOSYSTEM": "0",
                 "GIT_CONFIG_COUNT": "1",
                 "GIT_CONFIG_KEY_0": "core.hooksPath",
                 "GIT_CONFIG_VALUE_0": str(hooks),
                 "GIT_TEMPLATE_DIR": str(template),
             }
             with patch.dict(os.environ, polluted, clear=False):
+                environment, _, _ = paired_codex._benchmark_git_environment(
+                    root / "attribute-control"
+                )
                 repo, polluted_baseline, _ = paired_codex.copy_case_repo(case, root / "polluted")
+            self.assertEqual("1", environment["GIT_ATTR_NOSYSTEM"])
             self.assertEqual(clean_baseline, polluted_baseline)
             self.assertFalse(hook_marker.exists())
             self.assertFalse(any(
@@ -1898,6 +1903,84 @@ class PairedCodexTests(unittest.TestCase):
         self.assertIn("terminal_usage_count", paired_codex.parse_jsonl(duplicate).incomplete_reasons)
         invalid = OBSERVED_JSONL.replace('"input_tokens": 20', '"input_tokens": -1')
         self.assertIn("invalid_token_usage", paired_codex.parse_jsonl(invalid).incomplete_reasons)
+
+    def test_derived_token_overflow_normalizes_before_arm_ledger_persistence(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        findings = [{
+            "file": "subject/percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "summary": "zero denominator",
+        }]
+        result = completed_result(findings)
+        events = [json.loads(line) for line in result.output.splitlines()]
+        events[-1]["usage"]["input_tokens"] = paired_codex.MAX_TOKEN_VALUE
+        events[-1]["usage"]["output_tokens"] = 1
+        overflow_output = "\n".join(json.dumps(event) for event in events)
+
+        observation = paired_codex.parse_jsonl(overflow_output)
+        self.assertIn("invalid_token_usage", observation.incomplete_reasons)
+        self.assertEqual((None, None, None, None, None, None), (
+            observation.input_tokens,
+            observation.cached_input_tokens,
+            observation.cache_write_input_tokens,
+            observation.output_tokens,
+            observation.reasoning_output_tokens,
+            observation.total_tokens,
+        ))
+
+        schedule, cases, config = paired_codex._build_command_schedule(41)
+        entry = schedule.entries[0]
+        snapshot = next(item for item in schedule.cases if item.case_id == entry.case_id)
+        plan = next(
+            item for item in schedule.execution_plans
+            if (item.case_id, item.arm) == (entry.case_id, entry.arm)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = Path(directory)
+            record = paired_codex.run_sequential_arm(
+                cases[0], entry, config, schedule.run_contract, snapshot, plan,
+                seed=41,
+                state_root=state_root,
+                execute=lambda _request: replace(result, output=overflow_output),
+                capability=fake_capability,
+            )
+            ledger = state_root / "results.jsonl"
+            paired_codex.append_result_record(
+                ledger, {"kind": "schedule", **asdict(schedule)}
+            )
+            paired_codex.append_result_record(
+                ledger, {"kind": "arm-result", **asdict(record)}
+            )
+            loaded_schedule, loaded_records = paired_codex.load_results(ledger)
+
+        self.assertEqual(schedule, loaded_schedule)
+        self.assertEqual((record,), loaded_records)
+        self.assertEqual("incomplete", record.completion_state)
+        self.assertIn("invalid_token_usage", record.incomplete_reasons)
+        invocation = record.invocations[0]
+        self.assertEqual((None, None, None, None, None, None), (
+            invocation.input_tokens,
+            invocation.cached_input_tokens,
+            invocation.cache_write_input_tokens,
+            invocation.output_tokens,
+            invocation.reasoning_output_tokens,
+            invocation.total_tokens,
+        ))
+
+    def test_exact_maximum_derived_token_total_remains_valid(self):
+        events = [json.loads(line) for line in OBSERVED_JSONL.splitlines()]
+        events[-1]["usage"]["input_tokens"] = paired_codex.MAX_TOKEN_VALUE - 1
+        events[-1]["usage"]["output_tokens"] = 1
+        observation = paired_codex.parse_jsonl(
+            "\n".join(json.dumps(event) for event in events)
+        )
+        self.assertNotIn("invalid_token_usage", observation.incomplete_reasons)
+        self.assertEqual(paired_codex.MAX_TOKEN_VALUE - 1, observation.input_tokens)
+        self.assertEqual(1, observation.output_tokens)
+        self.assertEqual(paired_codex.MAX_TOKEN_VALUE, observation.total_tokens)
 
     def test_unknown_top_level_event_type_is_incomplete(self):
         changed = OBSERVED_JSONL + "\n" + json.dumps({"type": "item.updated", "item": {}})
