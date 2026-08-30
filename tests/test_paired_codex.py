@@ -13,6 +13,8 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from benchmarks import paired_codex
+from benchmarks.model_routing import ModelSettings, RoutingConfig
+from runtime.providers import ProviderCapability, ProviderResult
 
 
 OBSERVED_JSONL = "\n".join((
@@ -53,6 +55,56 @@ def fake_case_snapshots():
             case_definition_hash=str(index + 6) * 64,
         )
         for index, case_id in enumerate(("small", "medium", "complex"), 1)
+    )
+
+
+def fake_routing_config():
+    return RoutingConfig(
+        strategy="weighted_complexity_size",
+        complexity_weight=0.6,
+        size_weight=0.4,
+        worker_max_score=0.33,
+        expert_max_score=0.66,
+        models={
+            "worker": ModelSettings("gpt-5.6-luna", "medium"),
+            "expert": ModelSettings("gpt-5.6-terra", "high"),
+            "lead": ModelSettings("gpt-5.6-sol", "high"),
+            "reviewer": ModelSettings("gpt-5.6-terra", "high"),
+        },
+    )
+
+
+def completed_result(findings, *, marker=""):
+    final = json.dumps({"findings": findings}, separators=(",", ":")) + marker
+    output = "\n".join((
+        json.dumps({"type": "thread.started", "thread_id": "RAW_THREAD_SENTINEL"}),
+        json.dumps({"type": "turn.started"}),
+        json.dumps({"type": "item.completed", "item": {
+            "id": "redacted", "type": "agent_message", "text": final,
+        }}),
+        json.dumps({"type": "turn.completed", "usage": {
+            "input_tokens": 100,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 20,
+            "reasoning_output_tokens": 5,
+        }}),
+    ))
+    return ProviderResult("completed", "codex", "codex", False, 0, output, None, {})
+
+
+def fake_capability(_provider, *, probe_version=False):
+    return ProviderCapability("codex", True, "/fake/codex", "codex-cli 0.147.0")
+
+
+def real_case_snapshot(case):
+    with tempfile.TemporaryDirectory() as directory:
+        _, baseline, tree_hash = paired_codex.copy_case_repo(case, Path(directory))
+    return paired_codex.CaseSnapshot(
+        case.case_id,
+        baseline,
+        tree_hash,
+        paired_codex.canonical_case_definition_hash(case),
     )
 
 
@@ -544,6 +596,215 @@ class PairedCodexTests(unittest.TestCase):
         )
         self.assertIn("cli_version_mismatch", observation.incomplete_reasons)
         self.assertIn("adapter_fingerprint_mismatch", observation.incomplete_reasons)
+
+    def test_sequential_arm_uses_frozen_lead_settings_and_hash_only_receipt(self):
+        requests = []
+        visible_repositories = []
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        snapshot = real_case_snapshot(case)
+        findings = [{
+            "file": "subject/percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "description": "FINAL_RESPONSE_SENTINEL",
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = Path(directory)
+            def execute(request):
+                requests.append(request)
+                visible_repositories.append(sorted(
+                    path.relative_to(request.cwd).as_posix()
+                    for path in Path(request.cwd).rglob("*")
+                    if path.is_file() and ".git" not in path.parts
+                ))
+                return completed_result(findings)
+
+            record = paired_codex.run_sequential_arm(
+                case,
+                paired_codex.ScheduleEntry(0, "small", 1, "sequential"),
+                fake_routing_config(),
+                fake_run_contract(),
+                snapshot,
+                seed=41,
+                state_root=state_root,
+                execute=execute,
+                capability=fake_capability,
+            )
+            paired_codex.audit_proof_receipt(
+                state_root, record.invocations[0].receipt, record.invocations[0].output_hash
+            )
+        self.assertEqual(("gpt-5.6-sol", "high"), (
+            requests[0].model, requests[0].reasoning_effort
+        ))
+        self.assertFalse(requests[0].allow_fallback)
+        self.assertFalse(requests[0].write_access)
+        self.assertEqual([list(case.copy_manifest)], visible_repositories)
+        self.assertTrue(record.score and record.score.accepted)
+        self.assertIn("actual_model_unavailable", record.incomplete_reasons)
+        serialized = json.dumps(asdict(record), sort_keys=True)
+        self.assertNotIn("RAW_THREAD_SENTINEL", serialized)
+        self.assertNotIn("FINAL_RESPONSE_SENTINEL", serialized)
+
+    def test_canopy_arm_routes_leaf_and_reviewer_with_fresh_receipts(self):
+        requests = []
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        snapshot = real_case_snapshot(case)
+        findings = [{
+            "file": "subject/percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "description": "zero denominator",
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = Path(directory)
+            record = paired_codex.run_canopy_arm(
+                case,
+                paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                fake_routing_config(),
+                fake_run_contract(),
+                snapshot,
+                seed=41,
+                state_root=state_root,
+                execute=lambda request: requests.append(request) or completed_result(findings),
+                capability=fake_capability,
+            )
+            for invocation in record.invocations:
+                paired_codex.audit_proof_receipt(
+                    state_root, invocation.receipt, invocation.output_hash
+                )
+        self.assertEqual(["gpt-5.6-luna", "gpt-5.6-terra"], [
+            request.model for request in requests
+        ])
+        self.assertEqual(2, record.executed_nodes)
+        self.assertEqual(2, len({invocation.receipt for invocation in record.invocations}))
+        self.assertTrue(record.score and record.score.accepted)
+        self.assertNotIn("RAW_THREAD_SENTINEL", requests[-1].prompt)
+        self.assertNotEqual(requests[0].cwd, requests[-1].cwd)
+        self.assertTrue(all(not request.allow_fallback and not request.write_access for request in requests))
+
+    def test_failed_leaf_has_one_auditable_receipt_and_remains_incomplete(self):
+        calls = []
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        failed = ProviderResult("failed", "codex", "codex", False, 7, "RAW_FAILURE", "boom", {})
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = Path(directory)
+            record = paired_codex.run_canopy_arm(
+                case,
+                paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                fake_routing_config(),
+                fake_run_contract(),
+                real_case_snapshot(case),
+                seed=41,
+                state_root=state_root,
+                execute=lambda request: calls.append(request) or failed,
+                capability=fake_capability,
+            )
+            invocation = record.invocations[0]
+            paired_codex.audit_proof_receipt(state_root, invocation.receipt, invocation.output_hash)
+        self.assertEqual(1, len(calls))
+        self.assertEqual("failed", invocation.status)
+        self.assertEqual(1, record.failed_nodes)
+        self.assertEqual("incomplete", record.completion_state)
+        self.assertIn("provider_failed", record.incomplete_reasons)
+
+    def test_malformed_leaf_and_output_limit_fail_closed_without_reviewer(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        malformed_output = OBSERVED_JSONL.replace(
+            '"text": "REDACTED"', '"text": "not-json"'
+        )
+        malformed = ProviderResult(
+            "completed", "codex", "codex", False, 0, malformed_output, None, {}
+        )
+        limited = ProviderResult(
+            "failed", "codex", "codex", False, 125, "partial",
+            "provider output exceeded 1048576 bytes", {},
+        )
+        for result, reason in ((malformed, "invalid_model_findings"), (limited, "provider_output_limit")):
+            calls = []
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+                record = paired_codex.run_canopy_arm(
+                    case,
+                    paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                    fake_routing_config(),
+                    fake_run_contract(),
+                    real_case_snapshot(case),
+                    seed=41,
+                    state_root=Path(directory),
+                    execute=lambda request: calls.append(request) or result,
+                    capability=fake_capability,
+                )
+            self.assertEqual(1, len(calls))
+            self.assertIn(reason, record.incomplete_reasons)
+            self.assertIsNone(record.score)
+
+    def test_reviewer_aggregate_and_fully_dispatched_prompt_have_exact_bounds(self):
+        self.assertEqual("x" * 24_000, paired_codex._bounded_reviewer_aggregate("x" * 24_000))
+        with self.assertRaisesRegex(ValueError, "reviewer_aggregate_limit"):
+            paired_codex._bounded_reviewer_aggregate("x" * 24_001)
+        empty = paired_codex._reviewer_prompt("")
+        exact_aggregate = "x" * (
+            paired_codex.MAX_PROMPT_CHARS
+            - len(paired_codex.SECURITY_PREAMBLE)
+            - len(empty)
+        )
+        exact = paired_codex._reviewer_prompt(exact_aggregate)
+        self.assertEqual(
+            paired_codex.MAX_PROMPT_CHARS,
+            len(paired_codex.SECURITY_PREAMBLE + exact),
+        )
+        with self.assertRaisesRegex(ValueError, "reviewer_prompt_limit"):
+            paired_codex._reviewer_prompt(exact_aggregate + "x")
+
+    def test_reviewer_aggregate_overflow_stops_before_reviewer_dispatch(self):
+        requests = []
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        finding = [{
+            "file": "subject/percentage.py", "start_line": 2, "end_line": 2,
+            "category": "correctness", "severity": "medium", "description": "found",
+        }]
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            paired_codex, "_aggregate_leaf_artifacts", return_value="x" * 24_001
+        ):
+            record = paired_codex.run_canopy_arm(
+                case,
+                paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                fake_routing_config(),
+                fake_run_contract(),
+                real_case_snapshot(case),
+                seed=41,
+                state_root=Path(directory),
+                execute=lambda request: requests.append(request) or completed_result(finding),
+                capability=fake_capability,
+            )
+        self.assertEqual(1, len(requests))
+        self.assertIn("reviewer_aggregate_limit", record.incomplete_reasons)
+
+    def test_keyboard_interrupt_is_flushed_as_evidence_then_reraised(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results.jsonl"
+            with self.assertRaises(KeyboardInterrupt):
+                paired_codex.run_sequential_arm(
+                    case,
+                    paired_codex.ScheduleEntry(0, "small", 1, "sequential"),
+                    fake_routing_config(),
+                    fake_run_contract(),
+                    real_case_snapshot(case),
+                    seed=41,
+                    state_root=root,
+                    results_path=results,
+                    execute=lambda _request: (_ for _ in ()).throw(KeyboardInterrupt()),
+                    capability=fake_capability,
+                )
+            row = json.loads(results.read_text(encoding="utf-8"))
+        self.assertEqual("arm-result", row["kind"])
+        self.assertEqual("interrupted", row["completion_state"])
+        self.assertIn("interrupted", row["incomplete_reasons"])
 
     def test_probe_without_execute_never_calls_provider(self):
         output = io.StringIO()
