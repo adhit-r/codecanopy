@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import os
 import stat
 from dataclasses import FrozenInstanceError, asdict, replace
@@ -105,6 +106,57 @@ def real_case_snapshot(case):
         baseline,
         tree_hash,
         paired_codex.canonical_case_definition_hash(case),
+    )
+
+
+def complete_arm_record(schedule):
+    entry = schedule.entries[0]
+    snapshot = next(case for case in schedule.cases if case.case_id == entry.case_id)
+    invocation = paired_codex.InvocationRecord(
+        node_id="lead",
+        requested_provider="codex",
+        provider="codex",
+        fallback_used=False,
+        exit_code=0,
+        requested_model="gpt-5.6-sol",
+        requested_reasoning_effort="high",
+        actual_model="gpt-5.6-sol",
+        status="completed",
+        receipt=f"receipts/{entry.position:03d}-{entry.case_id}-{entry.arm}/lead.jsonl",
+        output_hash="d" * 64,
+        input_tokens=100,
+        cached_input_tokens=0,
+        cache_write_input_tokens=0,
+        output_tokens=20,
+        reasoning_output_tokens=5,
+        total_tokens=120,
+        incomplete_reasons=(),
+    )
+    contract = schedule.run_contract
+    return paired_codex.ArmRecord(
+        entry=entry,
+        seed=schedule.seed,
+        benchmark_version=contract.benchmark_version,
+        scorer_version=contract.scorer_version,
+        baseline=snapshot.baseline,
+        subject_tree_hash=snapshot.subject_tree_hash,
+        case_definition_hash=snapshot.case_definition_hash,
+        routing_config_hash=contract.routing_config_hash,
+        cli_version=contract.cli_version,
+        adapter_fingerprint=contract.adapter_fingerprint,
+        timeout_seconds=contract.timeout_seconds,
+        sandbox=contract.sandbox,
+        acceptance_contract_hash=contract.acceptance_contract_hash,
+        wall_seconds=1.25,
+        invocations=(invocation,),
+        score=paired_codex.Score(1, 0, 0, 1.0, 1.0, 1.0, True),
+        planned_nodes=1,
+        executed_nodes=1,
+        failed_nodes=0,
+        pruned_nodes=0,
+        critical_path_nodes=1,
+        completion_state="complete",
+        incomplete_reasons=(),
     )
 
 
@@ -258,6 +310,65 @@ class PairedCodexTests(unittest.TestCase):
                 paired_codex.load_results(path)
             self.assertEqual(original, path.read_bytes())
 
+    def test_result_loader_reconstructs_nested_typed_arm_records(self):
+        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        record = complete_arm_record(schedule)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, {"kind": "schedule", **asdict(schedule)})
+            paired_codex.append_result_record(path, {"kind": "arm-result", **asdict(record)})
+            loaded_schedule, loaded_records = paired_codex.load_results(path)
+        self.assertEqual(schedule, loaded_schedule)
+        self.assertEqual((record,), loaded_records)
+        self.assertIsInstance(loaded_records[0], paired_codex.ArmRecord)
+        self.assertIsInstance(loaded_records[0].entry, paired_codex.ScheduleEntry)
+        self.assertIsInstance(loaded_records[0].invocations[0], paired_codex.InvocationRecord)
+        self.assertIsInstance(loaded_records[0].score, paired_codex.Score)
+
+    def test_result_loader_rejects_invalid_arm_rows_fail_closed(self):
+        schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
+        valid = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
+
+        def extra_key(row):
+            row["junk"] = True
+
+        def missing_key(row):
+            row.pop("score")
+
+        def wrong_type(row):
+            row["wall_seconds"] = "1.25"
+
+        def non_finite(row):
+            row["wall_seconds"] = math.nan
+
+        def contract_mismatch(row):
+            row["routing_config_hash"] = "e" * 64
+
+        def nested_junk(row):
+            row["invocations"][0]["junk"] = True
+
+        for name, mutate in (
+            ("extra", extra_key),
+            ("missing", missing_key),
+            ("wrong_type", wrong_type),
+            ("non_finite", non_finite),
+            ("contract_mismatch", contract_mismatch),
+            ("nested_junk", nested_junk),
+        ):
+            row = json.loads(json.dumps(valid))
+            mutate(row)
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(
+                    path, {"kind": "schedule", **asdict(schedule)}
+                )
+                with path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+                original = path.read_bytes()
+                with self.assertRaisesRegex(ValueError, "arm result"):
+                    paired_codex.load_results(path)
+                self.assertEqual(original, path.read_bytes())
+
     def test_result_loader_rejects_boolean_schedule_positions(self):
         schedule = paired_codex.build_schedule(41, fake_run_contract(), fake_case_snapshots())
         record = {"kind": "schedule", **asdict(schedule)}
@@ -329,7 +440,7 @@ class PairedCodexTests(unittest.TestCase):
             "end_line": 2,
             "category": "correctness",
             "severity": "medium",
-            "description": "division by zero",
+            "summary": "division by zero",
         }]}), case)
         self.assertEqual((), parsed.incomplete_reasons)
         self.assertEqual((paired_codex.Finding(
@@ -352,7 +463,7 @@ class PairedCodexTests(unittest.TestCase):
             "end_line": 2,
             "category": "correctness",
             "severity": "medium",
-            "description": "division by zero",
+            "summary": "division by zero",
         }
         invalid_findings = (
             {**valid, "extra": "field"},
@@ -362,13 +473,53 @@ class PairedCodexTests(unittest.TestCase):
             {**valid, "start_line": 0},
             {**valid, "start_line": 2, "end_line": 1},
             {**valid, "end_line": 3},
-            {**valid, "description": ""},
+            {**valid, "summary": ""},
         )
         for finding in invalid_findings:
             with self.subTest(finding=finding):
                 parsed = paired_codex.parse_model_findings(json.dumps({"findings": [finding]}), case)
                 self.assertIsNone(parsed.findings)
                 self.assertTrue(parsed.incomplete_reasons)
+
+    def test_model_schema_requires_summary_and_normalizes_only_after_validation(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        prediction = {
+            "file": "subject/percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "summary": "zero denominator",
+        }
+        parsed = paired_codex.parse_model_findings(
+            json.dumps({"findings": [prediction]}), case
+        )
+        self.assertEqual("zero denominator", parsed.findings[0].description)
+        for invalid in (
+            {**prediction, "description": prediction["summary"]},
+            {key: value for key, value in prediction.items() if key != "summary"} | {
+                "description": prediction["summary"]
+            },
+        ):
+            with self.subTest(invalid=invalid):
+                rejected = paired_codex.parse_model_findings(
+                    json.dumps({"findings": [invalid]}), case
+                )
+                self.assertIsNone(rejected.findings)
+                self.assertIn("invalid_model_findings", rejected.incomplete_reasons)
+
+    def test_oracle_schema_remains_exactly_description(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "small"
+            shutil.copytree(paired_codex.CASE_ROOT / "small", root)
+            self.assertTrue(paired_codex.load_case_definition(root).oracle)
+            oracle = root / "oracle.json"
+            oracle.write_text(
+                oracle.read_text(encoding="utf-8").replace('"description"', '"summary"'),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "oracle findings"):
+                paired_codex.load_case_definition(root)
 
     def test_scorer_is_one_to_one_and_counts_duplicates_as_false_positives(self):
         expected = (
@@ -608,7 +759,7 @@ class PairedCodexTests(unittest.TestCase):
             "end_line": 2,
             "category": "correctness",
             "severity": "medium",
-            "description": "FINAL_RESPONSE_SENTINEL",
+            "summary": "FINAL_RESPONSE_SENTINEL",
         }]
         with tempfile.TemporaryDirectory() as directory:
             state_root = Path(directory)
@@ -657,7 +808,7 @@ class PairedCodexTests(unittest.TestCase):
             "end_line": 2,
             "category": "correctness",
             "severity": "medium",
-            "description": "zero denominator",
+            "summary": "zero denominator",
         }]
         with tempfile.TemporaryDirectory() as directory:
             state_root = Path(directory)
@@ -683,6 +834,8 @@ class PairedCodexTests(unittest.TestCase):
         self.assertEqual(2, len({invocation.receipt for invocation in record.invocations}))
         self.assertTrue(record.score and record.score.accepted)
         self.assertNotIn("RAW_THREAD_SENTINEL", requests[-1].prompt)
+        self.assertIn('"summary"', requests[-1].prompt)
+        self.assertNotIn('"description"', requests[-1].prompt)
         self.assertNotEqual(requests[0].cwd, requests[-1].cwd)
         self.assertTrue(all(not request.allow_fallback and not request.write_access for request in requests))
 
@@ -741,6 +894,77 @@ class PairedCodexTests(unittest.TestCase):
             self.assertIn(reason, record.incomplete_reasons)
             self.assertIsNone(record.score)
 
+    def test_leaf_finding_outside_assigned_scope_skips_reviewer(self):
+        requests = []
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "medium")
+        cross_scope = [{
+            "file": "subject/retry.py",
+            "start_line": 1,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "summary": "belongs to the other leaf",
+        }]
+        own_scope = [{
+            "file": "subject/retry.py",
+            "start_line": 1,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "summary": "zero retries skips the first attempt",
+        }]
+        results = iter((completed_result(cross_scope), completed_result(own_scope)))
+        with tempfile.TemporaryDirectory() as directory:
+            record = paired_codex.run_canopy_arm(
+                case,
+                paired_codex.ScheduleEntry(1, "medium", 1, "canopy"),
+                fake_routing_config(),
+                fake_run_contract(),
+                real_case_snapshot(case),
+                seed=41,
+                state_root=Path(directory),
+                execute=lambda request: requests.append(request) or next(results),
+                capability=fake_capability,
+            )
+        self.assertEqual(2, len(requests))
+        self.assertIsNone(record.score)
+        self.assertIn("leaf_scope_violation", record.incomplete_reasons)
+        self.assertEqual(1, record.pruned_nodes)
+
+    def test_incomplete_leaf_telemetry_with_valid_findings_skips_reviewer(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        finding = [{
+            "file": "subject/percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "summary": "zero denominator",
+        }]
+        completed = completed_result(finding)
+        for suffix, reason in (
+            ("not-json", "malformed_jsonl"),
+            (json.dumps({"type": "item.updated", "item": {}}), "unknown_event_type"),
+        ):
+            requests = []
+            incomplete = replace(completed, output=completed.output + "\n" + suffix)
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+                record = paired_codex.run_canopy_arm(
+                    case,
+                    paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                    fake_routing_config(),
+                    fake_run_contract(),
+                    real_case_snapshot(case),
+                    seed=41,
+                    state_root=Path(directory),
+                    execute=lambda request: requests.append(request) or incomplete,
+                    capability=fake_capability,
+                )
+            self.assertEqual(1, len(requests))
+            self.assertIsNone(record.score)
+            self.assertIn(reason, record.incomplete_reasons)
+            self.assertEqual(1, record.pruned_nodes)
+
     def test_reviewer_aggregate_and_fully_dispatched_prompt_have_exact_bounds(self):
         self.assertEqual("x" * 24_000, paired_codex._bounded_reviewer_aggregate("x" * 24_000))
         with self.assertRaisesRegex(ValueError, "reviewer_aggregate_limit"):
@@ -764,7 +988,7 @@ class PairedCodexTests(unittest.TestCase):
         case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
         finding = [{
             "file": "subject/percentage.py", "start_line": 2, "end_line": 2,
-            "category": "correctness", "severity": "medium", "description": "found",
+            "category": "correctness", "severity": "medium", "summary": "found",
         }]
         with tempfile.TemporaryDirectory() as directory, patch.object(
             paired_codex, "_aggregate_leaf_artifacts", return_value="x" * 24_001
