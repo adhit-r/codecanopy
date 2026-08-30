@@ -31,7 +31,7 @@ from runtime.providers import (
     execute_provider,
     provider_capability,
 )
-from runtime.safeio import open_private, read_regular_limited
+from runtime.safeio import ensure_private_directory, open_private, read_regular_limited
 from runtime.tree import TreeNode, run_tree
 from benchmarks.model_routing import (
     REASONING_EFFORTS,
@@ -2243,6 +2243,7 @@ def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecor
 
 
 def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
+    state_root = ensure_private_directory(state_root)
     schedule, cases, config = _build_command_schedule(seed)
     _persist_schedule(results, schedule)
     definitions = {case.case_id: case for case in cases}

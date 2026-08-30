@@ -549,6 +549,42 @@ class PairedCodexTests(unittest.TestCase):
         self.assertIn("all_nine_pairs_required", report["incomplete_reasons"])
         execute.assert_not_called()
 
+    def test_acceptance_creates_a_private_state_root_before_mocked_arms(self):
+        schedule, records, _receipt_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        by_entry = {record.entry: record for record in records}
+        state_root_observations = []
+
+        def fake_runner(_case, entry, _config, _contract, _snapshot, _plan, **kwargs):
+            state_root_observations.append(kwargs["state_root"].is_dir())
+            return by_entry[entry]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results" / "acceptance.jsonl"
+            state_root = root / "separate-private-state"
+            with patch.object(
+                paired_codex, "_build_command_schedule", return_value=(
+                    schedule, fake_case_definitions(), fake_routing_config()
+                )
+            ), patch.object(
+                paired_codex, "run_sequential_arm", side_effect=fake_runner
+            ), patch.object(
+                paired_codex, "run_canopy_arm", side_effect=fake_runner
+            ), redirect_stdout(io.StringIO()):
+                status = paired_codex._acceptance_command(results, state_root, 41)
+            loaded_schedule, loaded_records = paired_codex.load_results(results)
+
+            self.assertEqual(0, status)
+            self.assertEqual([True, True], state_root_observations)
+            self.assertTrue(state_root.is_dir())
+            self.assertEqual(0o700, stat.S_IMODE(state_root.stat().st_mode))
+            self.assertEqual(schedule, loaded_schedule)
+            self.assertEqual(
+                tuple(by_entry[entry] for entry in schedule.entries[:2]),
+                loaded_records,
+            )
+
     def test_acceptance_does_not_double_append_runner_interrupt_evidence(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)

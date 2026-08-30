@@ -46,6 +46,39 @@ def _open_parent(path: str | Path, *, create: bool) -> tuple[Path, int]:
         raise
 
 
+def ensure_private_directory(path: str | Path) -> Path:
+    """Create or validate one owner-only directory without following symlinks."""
+    target = private_path(path)
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
+    try:
+        target, parent = _open_parent(target, create=True)
+        try:
+            try:
+                descriptor = os.open(target.name, flags, dir_fd=parent)
+            except FileNotFoundError:
+                os.mkdir(target.name, 0o700, dir_fd=parent)
+                descriptor = os.open(target.name, flags, dir_fd=parent)
+        finally:
+            os.close(parent)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"state path is not a directory: {target}")
+        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+            raise ValueError(f"state directory is not owned by the current user: {target}")
+        os.fchmod(descriptor, 0o700)
+        if stat.S_IMODE(os.fstat(descriptor).st_mode) != 0o700:
+            raise ValueError(f"state directory permissions are not private: {target}")
+        return target
+    except ValueError:
+        raise
+    except OSError as error:
+        raise ValueError(f"refusing unsafe state directory: {target}") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def open_private(path: str | Path, *, append: bool) -> TextIO:
     """Open one owner-only regular file without following any path symlink."""
     flags = os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
