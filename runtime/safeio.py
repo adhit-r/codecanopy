@@ -79,7 +79,9 @@ def ensure_private_directory(path: str | Path) -> Path:
             os.close(descriptor)
 
 
-def open_private(path: str | Path, *, append: bool) -> TextIO:
+def open_private(
+    path: str | Path, *, append: bool, repair_permissions: bool = True
+) -> TextIO:
     """Open one owner-only regular file without following any path symlink."""
     flags = os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     flags |= os.O_RDWR if append else os.O_RDONLY
@@ -101,7 +103,7 @@ def open_private(path: str | Path, *, append: bool) -> TextIO:
             raise ValueError(f"state file is not owned by the current user: {target}")
         if metadata.st_nlink != 1:
             raise ValueError(f"state file has multiple hard links: {target}")
-        if append:
+        if append and repair_permissions:
             os.fchmod(descriptor, 0o600)
         elif stat.S_IMODE(metadata.st_mode) & 0o077:
             raise ValueError(f"state file permissions are not private: {target}")

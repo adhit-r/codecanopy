@@ -2429,7 +2429,7 @@ def _build_command_schedule(
 
 def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecord, ...]:
     serialized = _serialize_result_record({"kind": "schedule", **asdict(schedule)})
-    with open_private(path, append=True) as handle:
+    with open_private(path, append=True, repair_permissions=False) as handle:
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:

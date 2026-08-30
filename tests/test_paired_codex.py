@@ -847,6 +847,22 @@ class PairedCodexTests(unittest.TestCase):
                         paired_codex._persist_schedule(ledger, schedule)
                 self.assertEqual(original, ledger.read_bytes())
 
+    def test_persist_schedule_rejects_nonprivate_existing_ledger_without_repair(self):
+        schedule = fake_schedule()
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(
+                ledger, {"kind": "schedule", **asdict(schedule)}
+            )
+            ledger.chmod(0o644)
+            original = ledger.read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "permissions are not private"):
+                paired_codex._persist_schedule(ledger, schedule)
+
+            self.assertEqual(original, ledger.read_bytes())
+            self.assertEqual(0o644, ledger.stat().st_mode & 0o777)
+
     def test_acceptance_executes_only_first_small_pair_with_mocked_arms(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)
