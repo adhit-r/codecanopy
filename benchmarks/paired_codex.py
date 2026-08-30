@@ -7,7 +7,9 @@ import argparse
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
-from pathlib import Path
+import math
+import os
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 import tempfile
@@ -17,10 +19,234 @@ if __package__ is None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from runtime.providers import ProviderRequest, execute_provider, provider_capability
+from runtime.safeio import read_regular_limited
 
 
 MAX_TOKEN_VALUE = 2**63 - 1
 PROBE_PROMPT = "Return exactly OK."
+CASE_ROOT = Path(__file__).with_name("cases") / "codex-readonly-v1"
+_CASE_LIMITS = {"task": 16_384, "copy_manifest": 65_536, "dag": 65_536, "oracle": 65_536}
+_MAX_SUBJECT_BYTES = 1_048_576
+_CATEGORIES = frozenset({"correctness", "reliability", "security"})
+_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
+
+
+@dataclass(frozen=True)
+class Finding:
+    file: str
+    start_line: int
+    end_line: int
+    category: str
+    severity: str
+    description: str
+
+
+@dataclass(frozen=True)
+class DagNode:
+    node_id: str
+    role: str
+    complexity_score: float
+    size_score: float
+    scope: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CaseDefinition:
+    case_id: str
+    root: Path
+    task: str
+    copy_manifest: tuple[str, ...]
+    dag: tuple[DagNode, ...]
+    oracle: tuple[Finding, ...]
+
+
+def _read_exact_limited(path: Path, limit: int) -> bytes:
+    payload = read_regular_limited(path, limit)
+    if len(payload) > limit:
+        raise ValueError(f"input exceeds {limit} byte limit: {path}")
+    return payload
+
+
+def _relative_path(value: object) -> str:
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise ValueError("path must be a non-empty POSIX relative path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts or str(path) in ("", "."):
+        raise ValueError("path must not be absolute or contain parent components")
+    return path.as_posix()
+
+
+def _case_path(root: Path, relative: str) -> Path:
+    return root.joinpath(*PurePosixPath(relative).parts)
+
+
+def _json_object(path: Path, limit: int, keys: set[str]) -> dict[str, object]:
+    try:
+        value = json.loads(_read_exact_limited(path, limit))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"invalid JSON: {path}") from error
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"invalid JSON keys: {path}")
+    return value
+
+
+def _number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite number")
+    number = float(value)
+    if not 0 <= number <= 1:
+        raise ValueError(f"{field} must be between zero and one")
+    return number
+
+
+def load_case_definition(case_directory: str | Path) -> CaseDefinition:
+    root = Path(case_directory)
+    task_bytes = _read_exact_limited(root / "task.txt", _CASE_LIMITS["task"])
+    try:
+        task = task_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("task must be UTF-8") from error
+    if not task.strip():
+        raise ValueError("task must not be blank")
+
+    manifest = _json_object(root / "copy-manifest.json", _CASE_LIMITS["copy_manifest"], {"paths"})
+    paths = manifest["paths"]
+    if not isinstance(paths, list) or not paths:
+        raise ValueError("manifest paths must be a non-empty list")
+    copy_manifest = tuple(sorted(_relative_path(path) for path in paths))
+    if len(set(copy_manifest)) != len(copy_manifest):
+        raise ValueError("manifest paths must be unique")
+    if any(path != "task.txt" and not path.startswith("subject/") for path in copy_manifest):
+        raise ValueError("manifest may contain only task.txt and subject files")
+    if "task.txt" not in copy_manifest:
+        raise ValueError("manifest must contain task.txt")
+    subject_paths = {path for path in copy_manifest if path.startswith("subject/")}
+    if not subject_paths:
+        raise ValueError("manifest must contain subject files")
+    sources: dict[str, bytes] = {
+        path: _read_exact_limited(_case_path(root, path), _MAX_SUBJECT_BYTES)
+        for path in subject_paths
+    }
+    try:
+        source_lines = {path: payload.decode("utf-8").splitlines() for path, payload in sources.items()}
+    except UnicodeDecodeError as error:
+        raise ValueError("subject files must be UTF-8") from error
+
+    raw_dag = _json_object(root / "dag.json", _CASE_LIMITS["dag"], {"nodes"})
+    raw_nodes = raw_dag["nodes"]
+    if not isinstance(raw_nodes, list) or not raw_nodes:
+        raise ValueError("DAG nodes must be a non-empty list")
+    dag: list[DagNode] = []
+    node_ids: set[str] = set()
+    scopes: set[str] = set()
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, dict) or set(raw_node) != {
+            "id", "role", "complexity_score", "size_score", "scope"
+        }:
+            raise ValueError("DAG nodes must use the exact node schema")
+        node_id = raw_node["id"]
+        role = raw_node["role"]
+        raw_scope = raw_node["scope"]
+        if not isinstance(node_id, str) or not node_id or node_id in node_ids:
+            raise ValueError("DAG node ids must be non-empty and unique")
+        if role not in {"worker", "security"}:
+            raise ValueError("DAG roles must be worker or security")
+        if not isinstance(raw_scope, list) or not raw_scope:
+            raise ValueError("DAG scope must be a non-empty list")
+        scope = tuple(_relative_path(path) for path in raw_scope)
+        if len(set(scope)) != len(scope) or any(path not in subject_paths for path in scope):
+            raise ValueError("DAG scopes must be unique manifest subject files")
+        if scopes.intersection(scope):
+            raise ValueError("DAG node scopes must be disjoint")
+        node_ids.add(node_id)
+        scopes.update(scope)
+        dag.append(DagNode(
+            node_id=node_id,
+            role=role,
+            complexity_score=_number(raw_node["complexity_score"], "complexity_score"),
+            size_score=_number(raw_node["size_score"], "size_score"),
+            scope=scope,
+        ))
+    if scopes != subject_paths:
+        raise ValueError("DAG scopes must cover every manifest subject file")
+
+    raw_oracle = _json_object(root / "oracle.json", _CASE_LIMITS["oracle"], {"findings"})
+    raw_findings = raw_oracle["findings"]
+    if not isinstance(raw_findings, list):
+        raise ValueError("oracle findings must be a list")
+    oracle: list[Finding] = []
+    intervals: dict[str, list[tuple[int, int]]] = {}
+    for raw_finding in raw_findings:
+        if not isinstance(raw_finding, dict) or set(raw_finding) != {
+            "file", "start_line", "end_line", "category", "severity", "description"
+        }:
+            raise ValueError("oracle findings must use the exact finding schema")
+        file = _relative_path(raw_finding["file"])
+        start_line, end_line = raw_finding["start_line"], raw_finding["end_line"]
+        category, severity, description = (
+            raw_finding["category"], raw_finding["severity"], raw_finding["description"]
+        )
+        if file not in subject_paths:
+            raise ValueError("oracle files must be manifest subject files")
+        if (isinstance(start_line, bool) or not isinstance(start_line, int)
+                or isinstance(end_line, bool) or not isinstance(end_line, int)
+                or start_line < 1 or end_line < start_line):
+            raise ValueError("oracle line range is invalid")
+        if end_line > len(source_lines[file]):
+            raise ValueError("oracle line range exceeds source file")
+        if category not in _CATEGORIES or severity not in _SEVERITIES:
+            raise ValueError("oracle category or severity is unknown")
+        if not isinstance(description, str) or not description or len(description) > 8_192:
+            raise ValueError("oracle description is invalid")
+        if any(start_line <= prior_end and prior_start <= end_line for prior_start, prior_end in intervals.get(file, ())):
+            raise ValueError("oracle findings must not overlap")
+        intervals.setdefault(file, []).append((start_line, end_line))
+        oracle.append(Finding(file, start_line, end_line, category, severity, description))
+
+    return CaseDefinition(root.name, root, task, copy_manifest, tuple(dag), tuple(oracle))
+
+
+def canonical_case_definition_hash(case: CaseDefinition) -> str:
+    digests = {
+        name: sha256(_read_exact_limited(path, _CASE_LIMITS[name])).hexdigest()
+        for name, path in {
+            "task": case.root / "task.txt",
+            "copy_manifest": case.root / "copy-manifest.json",
+            "dag": case.root / "dag.json",
+            "oracle": case.root / "oracle.json",
+        }.items()
+    }
+    payload = {"schema_version": 1, "digests": digests}
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def copy_case_repo(case: CaseDefinition, destination: str | Path) -> tuple[Path, str, str]:
+    repo = Path(destination) / case.case_id
+    if repo.exists():
+        raise ValueError(f"baseline repository already exists: {repo}")
+    repo.mkdir(parents=True)
+    for path in case.copy_manifest:
+        target = _case_path(repo, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        limit = _CASE_LIMITS["task"] if path == "task.txt" else _MAX_SUBJECT_BYTES
+        target.write_bytes(_read_exact_limited(_case_path(case.root, path), limit))
+    subprocess.run(["git", "init", "--quiet", str(repo)], check=True, capture_output=True, text=True)
+    for key, value in (("user.name", "CodeCanopy Benchmark"), ("user.email", "benchmark@codecanopy.invalid"),
+                       ("core.autocrlf", "false")):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(repo), "add", "--all"], check=True, capture_output=True, text=True)
+    environment = {**os.environ, "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z"}
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "--quiet", "-m", "CodeCanopy benchmark baseline"],
+        check=True, capture_output=True, text=True, env=environment,
+    )
+    baseline = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    tree_hash = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return repo, baseline, tree_hash
 
 
 @dataclass(frozen=True)

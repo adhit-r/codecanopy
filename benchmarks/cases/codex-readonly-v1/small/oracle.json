@@ -1,0 +1,1 @@
+{"findings":[{"category":"correctness","description":"total can be zero, causing division by zero","end_line":2,"file":"subject/percentage.py","severity":"medium","start_line":2}]}

@@ -1,0 +1,1 @@
+{"nodes":[{"complexity_score":0.85,"id":"auth","role":"security","scope":["subject/auth.py"],"size_score":0.35},{"complexity_score":0.55,"id":"export","role":"worker","scope":["subject/export.py"],"size_score":0.3},{"complexity_score":0.25,"id":"jobs","role":"worker","scope":["subject/jobs.py"],"size_score":0.25}]}
