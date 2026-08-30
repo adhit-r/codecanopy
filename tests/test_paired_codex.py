@@ -1,4 +1,5 @@
 import io
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import json
 import math
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -773,6 +775,77 @@ class PairedCodexTests(unittest.TestCase):
         self.assertEqual((schedule, ()), (loaded, records))
         self.assertIn("actual_model_unavailable", output.getvalue())
         execute.assert_not_called()
+
+    def test_persist_schedule_uses_safe_io_and_rejects_linked_ledgers(self):
+        schedule = fake_schedule()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for link_kind in ("symlink", "hardlink"):
+                with self.subTest(link_kind=link_kind):
+                    target = root / f"{link_kind}-target.jsonl"
+                    target.write_bytes(b"untouched")
+                    ledger = root / f"{link_kind}-results.jsonl"
+                    if link_kind == "symlink":
+                        ledger.symlink_to(target)
+                    else:
+                        os.link(target, ledger)
+                    with patch.object(
+                        Path, "exists", side_effect=AssertionError("unsafe path probe")
+                    ), patch.object(
+                        Path, "stat", side_effect=AssertionError("unsafe path probe")
+                    ), self.assertRaises(ValueError):
+                        paired_codex._persist_schedule(ledger, schedule)
+                    self.assertEqual(b"untouched", target.read_bytes())
+
+    def test_persist_schedule_initializes_empty_ledger_once_under_concurrent_callers(self):
+        schedule = fake_schedule()
+        barrier = threading.Barrier(2)
+        original_stat = Path.stat
+
+        def synchronized_stat(path):
+            metadata = original_stat(path)
+            barrier.wait(timeout=2)
+            return metadata
+
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = Path(directory) / "results.jsonl"
+            ledger.touch(mode=0o600)
+            with patch.object(Path, "stat", synchronized_stat):
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [
+                        pool.submit(paired_codex._persist_schedule, ledger, schedule)
+                        for _ in range(2)
+                    ]
+                    self.assertEqual([(), ()], [future.result(timeout=5) for future in futures])
+            self.assertEqual(1, len(ledger.read_text(encoding="utf-8").splitlines()))
+            self.assertEqual((schedule, ()), paired_codex.load_results(ledger))
+
+    def test_persist_schedule_preserves_resume_mismatch_and_started_ledgers(self):
+        schedule = fake_schedule()
+        cases = (
+            ("matching", schedule, ()),
+            ("mismatch", fake_schedule(42), ()),
+            ("started", schedule, (complete_arm_record(schedule),)),
+        )
+        for name, persisted_schedule, records in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                ledger = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(
+                    ledger, {"kind": "schedule", **asdict(persisted_schedule)}
+                )
+                for record in records:
+                    paired_codex.append_result_record(
+                        ledger, {"kind": "arm-result", **asdict(record)}
+                    )
+                original = ledger.read_bytes()
+                if name == "matching":
+                    self.assertEqual((), paired_codex._persist_schedule(ledger, schedule))
+                else:
+                    with self.assertRaisesRegex(
+                        ValueError, "different or started run"
+                    ):
+                        paired_codex._persist_schedule(ledger, schedule)
+                self.assertEqual(original, ledger.read_bytes())
 
     def test_acceptance_executes_only_first_small_pair_with_mocked_arms(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()

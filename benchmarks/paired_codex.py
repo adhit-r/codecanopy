@@ -237,7 +237,7 @@ def build_schedule(
     )
 
 
-def append_result_record(path: str | Path, record: Mapping[str, object]) -> None:
+def _serialize_result_record(record: Mapping[str, object]) -> str:
     if not isinstance(record, Mapping) or any(not isinstance(key, str) for key in record):
         raise ValueError("benchmark result record must be a JSON object with string keys")
     try:
@@ -249,6 +249,12 @@ def append_result_record(path: str | Path, record: Mapping[str, object]) -> None
     encoded_size = len(serialized.encode("utf-8"))
     if encoded_size > MAX_RESULT_EVENT_BYTES:
         raise ValueError("benchmark result event size limit exceeded")
+    return serialized
+
+
+def append_result_record(path: str | Path, record: Mapping[str, object]) -> None:
+    serialized = _serialize_result_record(record)
+    encoded_size = len(serialized.encode("utf-8"))
     with open_private(path, append=True) as handle:
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -368,17 +374,9 @@ def _schedule_from_record(record: object) -> BenchmarkSchedule:
     return schedule
 
 
-def load_results(path: str | Path) -> tuple[BenchmarkSchedule, tuple[ArmRecord, ...]]:
-    with open_private(path, append=False) as handle:
-        if fcntl is not None:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
-        try:
-            if os.fstat(handle.fileno()).st_size > MAX_RESULT_BYTES:
-                raise ValueError("benchmark result size limit exceeded")
-            payload = handle.read(MAX_RESULT_BYTES + 1)
-        finally:
-            if fcntl is not None:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+def _results_from_payload(
+    payload: str,
+) -> tuple[BenchmarkSchedule, tuple[ArmRecord, ...]]:
     if len(payload.encode("utf-8")) > MAX_RESULT_BYTES:
         raise ValueError("benchmark result size limit exceeded")
     lines = [line for line in payload.splitlines() if line.strip()]
@@ -402,6 +400,20 @@ def load_results(path: str | Path) -> tuple[BenchmarkSchedule, tuple[ArmRecord, 
             raise ValueError("benchmark schedule must appear exactly once and first")
         records.append(_arm_from_record(row, schedule))
     return schedule, tuple(records)
+
+
+def load_results(path: str | Path) -> tuple[BenchmarkSchedule, tuple[ArmRecord, ...]]:
+    with open_private(path, append=False) as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        try:
+            if os.fstat(handle.fileno()).st_size > MAX_RESULT_BYTES:
+                raise ValueError("benchmark result size limit exceeded")
+            payload = handle.read(MAX_RESULT_BYTES + 1)
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    return _results_from_payload(payload)
 
 
 def audit_proof_receipt(state_root: str | Path, reference: str, output_hash: str) -> None:
@@ -2416,13 +2428,31 @@ def _build_command_schedule(
 
 
 def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecord, ...]:
-    if path.exists() and path.stat().st_size:
-        existing, records = load_results(path)
-        if existing != schedule or records:
-            raise ValueError("benchmark results already contain a different or started run")
-        return records
-    append_result_record(path, {"kind": "schedule", **asdict(schedule)})
-    return ()
+    serialized = _serialize_result_record({"kind": "schedule", **asdict(schedule)})
+    with open_private(path, append=True) as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            size = os.fstat(handle.fileno()).st_size
+            if size > MAX_RESULT_BYTES:
+                raise ValueError("benchmark result size limit exceeded")
+            if size:
+                handle.seek(0)
+                existing, records = _results_from_payload(
+                    handle.read(MAX_RESULT_BYTES + 1)
+                )
+                if existing != schedule or records:
+                    raise ValueError(
+                        "benchmark results already contain a different or started run"
+                    )
+                return records
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+            return ()
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
