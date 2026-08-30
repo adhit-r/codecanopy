@@ -64,6 +64,8 @@ python3 benchmarks/paired_codex.py report \
 
 The 2026-08-30 Codex CLI 0.147.0 live probe exposed cumulative token usage but no actual-model identity. A requested model is not treated as an actual model. The full pilot and comparative chart are therefore blocked. Local small-pair wall-time, token, and deterministic-quality observations are incomplete evidence and must not be marketed as gains.
 
+Local reports label the graph arm `sequential fixed-plan CodeCanopy v0.4` and list the state and reasons for all 18 scheduled runs, including missing records. If any publication-gate reason exists, the report emits no pair deltas, medians, or pass rates; chart-ready aggregates exist only after one clean all-nine-pair run.
+
 ## Publication gate
 
 Publish a comparative chart only when both arms have complete provider-reported usage, immutable baselines, identical acceptance criteria, and receipt-backed actual provider/model identities. Label synthetic scheduler fixtures as synthetic. Until paired results exist, state `not measured` for token, wall-clock, and quality deltas and describe CodeCanopy's graph as a control model, not a proven speedup or globally optimal shortest-path algorithm.

@@ -38,6 +38,10 @@ MAX_DEPENDENCIES = 3
 ExecutionSettings = Callable[["TreeNode"], tuple[str | None, str | None]]
 
 
+class ReceiptEvidenceError(RuntimeError):
+    """The provider returned, but its proof receipt could not be persisted."""
+
+
 @dataclass(frozen=True)
 class TreeNode:
     node_id: str
@@ -212,14 +216,19 @@ def run_tree(
         )
         result = execute(request)
         receipt_path = receipts / f"{node.node_id}.jsonl"
-        append_proof_receipt(
-            receipt_path,
-            request,
-            result,
-            run_id=run_id,
-            node_id=node.node_id,
-            baseline=resolved_baselines[node.node_id],
-        )
+        try:
+            append_proof_receipt(
+                receipt_path,
+                request,
+                result,
+                run_id=run_id,
+                node_id=node.node_id,
+                baseline=resolved_baselines[node.node_id],
+            )
+        except (OSError, ValueError) as error:
+            raise ReceiptEvidenceError(
+                f"proof receipt evidence failed for node {node.node_id}"
+            ) from error
         store.record_check(run_id, node.node_id, "provider invocation", result.status, evidence=str(receipt_path))
         store.set_node_state(run_id, node.node_id, "returned")
         accepted = result.status == "completed" and accept is not None and accept(node, result)

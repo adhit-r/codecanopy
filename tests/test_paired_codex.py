@@ -56,8 +56,14 @@ def fake_case_snapshots():
             baseline=str(index) * 40,
             subject_tree_hash=str(index + 3) * 40,
             case_definition_hash=str(index + 6) * 64,
+            expected_findings=expected,
+            required_findings=required,
         )
-        for index, case_id in enumerate(("small", "medium", "complex"), 1)
+        for index, (case_id, expected, required) in enumerate((
+            ("small", 1, 0),
+            ("medium", 2, 1),
+            ("complex", 3, 3),
+        ), 1)
     )
 
 
@@ -129,6 +135,8 @@ def real_case_snapshot(case):
         baseline,
         tree_hash,
         paired_codex.canonical_case_definition_hash(case),
+        len(case.oracle),
+        sum(finding.severity in {"high", "critical"} for finding in case.oracle),
     )
 
 
@@ -177,7 +185,7 @@ def complete_arm_record(schedule):
         acceptance_contract_hash=contract.acceptance_contract_hash,
         wall_seconds=1.25,
         invocations=(invocation,),
-        score=paired_codex.Score(1, 0, 0, 1.0, 1.0, 1.0, True),
+        score=paired_codex.Score(1, 0, 0, 0, 1.0, 1.0, 1.0, True),
         planned_nodes=1,
         executed_nodes=1,
         failed_nodes=0,
@@ -269,9 +277,14 @@ def write_complete_records_and_receipts_for_test(seed=41):
                 incomplete_reasons=(),
             ))
         score = (
-            paired_codex.Score(1, 1, 1, 0.5, 0.5, 0.5, False)
+            paired_codex.Score(
+                0, 0, snapshot.expected_findings, 0, 0.0, 0.0, 0.0, False
+            )
             if entry.arm == "sequential"
-            else paired_codex.Score(9, 1, 1, 0.9, 0.9, 0.9, True)
+            else paired_codex.Score(
+                snapshot.expected_findings, 0, 0, snapshot.required_findings,
+                1.0, 1.0, 1.0, True,
+            )
         )
         contract = schedule.run_contract
         records.append(paired_codex.ArmRecord(
@@ -303,13 +316,269 @@ def write_complete_records_and_receipts_for_test(seed=41):
 
 
 class PairedCodexTests(unittest.TestCase):
+    def test_schedule_freezes_oracle_counts_before_dispatch(self):
+        schedule, _, _ = paired_codex._build_command_schedule(41)
+        self.assertEqual(
+            [("small", 1, 0), ("medium", 2, 1), ("complex", 3, 3)],
+            [
+                (case.case_id, case.expected_findings, case.required_findings)
+                for case in schedule.cases
+            ],
+        )
+
+    def test_forged_required_coverage_and_huge_tokens_cannot_load_or_publish(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        complex_index = next(
+            index for index, record in enumerate(records)
+            if record.entry.case_id == "complex"
+        )
+        complex_record = records[complex_index]
+        forged_score = replace(
+            complex_record.score,
+            matched_required=0,
+            accepted=True,
+        )
+        forged_invocation = replace(
+            complex_record.invocations[0],
+            input_tokens=2**70,
+            output_tokens=0,
+            total_tokens=2**70,
+        )
+        forged = replace(
+            complex_record,
+            invocations=(forged_invocation, *complex_record.invocations[1:]),
+            score=forged_score,
+        )
+        report = paired_codex.calculate_report(
+            schedule,
+            (*records[:complex_index], forged, *records[complex_index + 1:]),
+            state_root=state_root,
+        )
+        self.assertFalse(report.publishable)
+        self.assertEqual((), report.pairs)
+        self.assertIn("invalid_token_usage", report.incomplete_reasons)
+        self.assertIn("invalid_score", report.incomplete_reasons)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            paired_codex.append_result_record(path, {"kind": "schedule", **asdict(schedule)})
+            paired_codex.append_result_record(path, {"kind": "arm-result", **asdict(forged)})
+            with self.assertRaisesRegex(ValueError, "arm result"):
+                paired_codex.load_results(path)
+
+    def test_schedule_loader_rejects_impossible_oracle_count_bounds(self):
+        schedule = fake_schedule()
+        for expected, required in ((0, 0), (1_001, 0), (1, 2), (1, -1)):
+            row = {"kind": "schedule", **asdict(schedule)}
+            row["cases"][0]["expected_findings"] = expected
+            row["cases"][0]["required_findings"] = required
+            with self.subTest(expected=expected, required=required), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(path, row)
+                with self.assertRaisesRegex(ValueError, "schedule|finding"):
+                    paired_codex.load_results(path)
+
+    def test_blocked_report_exposes_all_runs_but_no_subset_metrics(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        report = paired_codex.calculate_report(schedule, records[:-1], state_root=state_root)
+        self.assertEqual("sequential fixed-plan CodeCanopy v0.4", report.canopy_label)
+        self.assertEqual(18, len(report.scheduled_runs))
+        self.assertEqual(1, sum(run.state == "missing" for run in report.scheduled_runs))
+        missing = next(run for run in report.scheduled_runs if run.state == "missing")
+        self.assertEqual(("missing_record",), missing.incomplete_reasons)
+        self.assertEqual((), report.pairs)
+        self.assertIsNone(report.median_token_delta_percent)
+        self.assertIsNone(report.median_time_delta_percent)
+        self.assertIsNone(report.median_quality_delta)
+        self.assertIsNone(report.sequential_pass_rate)
+        self.assertIsNone(report.canopy_pass_rate)
+
+    def test_receipt_evidence_failures_after_provider_return_are_retained(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        finding = [{
+            "file": "subject/percentage.py", "start_line": 2, "end_line": 2,
+            "category": "correctness", "severity": "medium", "summary": "zero",
+        }]
+        for boundary in ("append", "audit"):
+            with self.subTest(arm="sequential", boundary=boundary), tempfile.TemporaryDirectory() as directory:
+                patcher = patch.object(
+                    paired_codex,
+                    "append_proof_receipt" if boundary == "append" else "audit_proof_receipt",
+                    side_effect=OSError("injected receipt evidence failure"),
+                )
+                with patcher:
+                    record = paired_codex.run_sequential_arm(
+                        case,
+                        paired_codex.ScheduleEntry(0, "small", 1, "sequential"),
+                        fake_routing_config(), fake_run_contract(), real_case_snapshot(case),
+                        fake_execution_plan(case, "sequential"), seed=41,
+                        state_root=Path(directory), execute=lambda _request: completed_result(finding),
+                        capability=fake_capability,
+                    )
+                self.assertEqual("incomplete", record.completion_state)
+                self.assertEqual(("receipt_evidence_failed",), tuple(
+                    reason for reason in record.invocations[0].incomplete_reasons
+                    if reason == "receipt_evidence_failed"
+                ))
+                self.assertTrue(record.invocations[0].receipt.endswith("/lead.jsonl"))
+                self.assertRegex(record.invocations[0].output_hash, r"^[0-9a-f]{64}$")
+
+        for boundary in ("append", "audit"):
+            with self.subTest(arm="leaf", boundary=boundary), tempfile.TemporaryDirectory() as directory:
+                target = runtime_tree if boundary == "append" else paired_codex
+                attribute = "append_proof_receipt" if boundary == "append" else "audit_proof_receipt"
+                with patch.object(target, attribute, side_effect=OSError("injected receipt evidence failure")):
+                    record = paired_codex.run_canopy_arm(
+                        case,
+                        paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                        fake_routing_config(), fake_run_contract(), real_case_snapshot(case),
+                        fake_execution_plan(case, "canopy"), seed=41,
+                        state_root=Path(directory), execute=lambda _request: completed_result(finding),
+                        capability=fake_capability,
+                    )
+                self.assertEqual(("percentage",), tuple(
+                    invocation.node_id for invocation in record.invocations
+                ))
+                self.assertIn("receipt_evidence_failed", record.invocations[0].incomplete_reasons)
+                self.assertEqual("incomplete", record.completion_state)
+
+        original_append = paired_codex.append_proof_receipt
+        original_audit = paired_codex.audit_proof_receipt
+        for boundary in ("append", "audit"):
+            with self.subTest(arm="reviewer", boundary=boundary), tempfile.TemporaryDirectory() as directory:
+                def fail_reviewer_append(path, *args, **kwargs):
+                    if Path(path).name == "reviewer.jsonl":
+                        raise OSError("injected reviewer receipt append failure")
+                    return original_append(path, *args, **kwargs)
+
+                def fail_reviewer_audit(root, reference, output_hash):
+                    if reference.endswith("/reviewer.jsonl"):
+                        raise OSError("injected reviewer receipt audit failure")
+                    return original_audit(root, reference, output_hash)
+
+                patcher = patch.object(
+                    paired_codex,
+                    "append_proof_receipt" if boundary == "append" else "audit_proof_receipt",
+                    side_effect=fail_reviewer_append if boundary == "append" else fail_reviewer_audit,
+                )
+                with patcher:
+                    record = paired_codex.run_canopy_arm(
+                        case,
+                        paired_codex.ScheduleEntry(1, "small", 1, "canopy"),
+                        fake_routing_config(), fake_run_contract(), real_case_snapshot(case),
+                        fake_execution_plan(case, "canopy"), seed=41,
+                        state_root=Path(directory), execute=lambda _request: completed_result(finding),
+                        capability=fake_capability,
+                    )
+                self.assertEqual("reviewer", record.invocations[-1].node_id)
+                self.assertIn("receipt_evidence_failed", record.invocations[-1].incomplete_reasons)
+                self.assertEqual("incomplete", record.completion_state)
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            paired_codex,
+            "append_proof_receipt",
+            side_effect=RuntimeError("injected programming error"),
+        ), self.assertRaisesRegex(RuntimeError, "programming error"):
+            paired_codex.run_sequential_arm(
+                case,
+                paired_codex.ScheduleEntry(0, "small", 1, "sequential"),
+                fake_routing_config(), fake_run_contract(), real_case_snapshot(case),
+                fake_execution_plan(case, "sequential"), seed=41,
+                state_root=Path(directory), execute=lambda _request: completed_result(finding),
+                capability=fake_capability,
+            )
+
+    def test_benchmark_git_ignores_config_templates_and_hooks(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, clean_baseline, _ = paired_codex.copy_case_repo(case, root / "clean")
+            hooks = root / "hostile-hooks"
+            hooks.mkdir()
+            hook_marker = root / "hook-ran"
+            hook = hooks / "pre-commit"
+            hook.write_text(f"#!/bin/sh\ntouch '{hook_marker}'\n", encoding="utf-8")
+            hook.chmod(0o700)
+            template = root / "hostile-template"
+            template.mkdir()
+            (template / "provider-visible-template-data").write_text("hostile", encoding="utf-8")
+            polluted = {
+                "HOME": str(root / "hostile-home"),
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "core.hooksPath",
+                "GIT_CONFIG_VALUE_0": str(hooks),
+                "GIT_TEMPLATE_DIR": str(template),
+            }
+            with patch.dict(os.environ, polluted, clear=False):
+                repo, polluted_baseline, _ = paired_codex.copy_case_repo(case, root / "polluted")
+            self.assertEqual(clean_baseline, polluted_baseline)
+            self.assertFalse(hook_marker.exists())
+            self.assertFalse(any(
+                path.name == "provider-visible-template-data" for path in repo.rglob("*")
+            ))
+
+    def test_finding_overlap_is_scoped_to_file_category_and_severity(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        base = {
+            "file": "subject/percentage.py", "start_line": 2, "end_line": 2,
+            "category": "correctness", "severity": "medium", "summary": "one",
+        }
+        valid = paired_codex.parse_model_findings(json.dumps({"findings": [
+            base,
+            {**base, "category": "maintainability", "summary": "two"},
+            {**base, "severity": "high", "summary": "three"},
+        ]}), case)
+        self.assertEqual(3, len(valid.findings))
+        self.assertIn("maintainability", paired_codex.FINDINGS_INSTRUCTIONS)
+        duplicate = paired_codex.parse_model_findings(json.dumps({"findings": [
+            base, {**base, "summary": "same tuple"},
+        ]}), case)
+        self.assertIsNone(duplicate.findings)
+        self.assertEqual(("invalid_model_findings",), duplicate.incomplete_reasons)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "small"
+            shutil.copytree(paired_codex.CASE_ROOT / "small", root)
+            oracle_base = {**base, "description": "one"}
+            oracle_base.pop("summary")
+            (root / "oracle.json").write_text(json.dumps({"findings": [
+                oracle_base,
+                {**oracle_base, "category": "maintainability", "description": "two"},
+            ]}), encoding="utf-8")
+            self.assertEqual(2, len(paired_codex.load_case_definition(root).oracle))
+
+    def test_live_probe_failure_and_structural_invalidity_exit_nonzero(self):
+        failed = ProviderResult("failed", "codex", "codex", False, 7, "", "boom", {})
+        invalid = ProviderResult("completed", "codex", "codex", False, 0, "not-json", None, {})
+        valid = completed_result([])
+        for result, status, reasons in (
+            (failed, 1, {
+                "provider_failed", "terminal_usage_count", "final_response_count",
+                "actual_model_unavailable",
+            }),
+            (invalid, 1, {
+                "malformed_jsonl", "terminal_usage_count", "final_response_count",
+                "actual_model_unavailable",
+            }),
+            (valid, 0, {"actual_model_unavailable"}),
+        ):
+            output = io.StringIO()
+            with self.subTest(provider_status=result.status), patch.object(
+                paired_codex, "provider_capability", side_effect=fake_capability
+            ), patch.object(
+                paired_codex, "execute_provider", return_value=result
+            ), redirect_stdout(output):
+                actual = paired_codex.main(["probe", "--execute"])
+            self.assertEqual(status, actual)
+            self.assertEqual(reasons, set(json.loads(output.getvalue())["incomplete_reasons"]))
+
     def test_all_nine_complete_pairs_are_required_for_publication(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)
         report = paired_codex.calculate_report(schedule, records, state_root=state_root)
         self.assertTrue(report.publishable)
         self.assertEqual((9, 18), (len(report.pairs), report.sample_count))
-        self.assertEqual((20.0, 20.0, 0.4), (
+        self.assertEqual((20.0, 20.0, 1.0), (
             report.median_token_delta_percent,
             report.median_time_delta_percent,
             report.median_quality_delta,
@@ -344,7 +613,7 @@ class PairedCodexTests(unittest.TestCase):
                 report = paired_codex.calculate_report(schedule, changed, state_root=state_root)
                 self.assertFalse(report.publishable)
                 self.assertIn(reason, report.incomplete_reasons)
-                self.assertEqual(8, len(report.pairs))
+                self.assertEqual(0, len(report.pairs))
 
     def test_cross_repetition_and_schedule_authority_mismatches_block_publication(self):
         schedule, complete, state_root, cleanup = write_complete_records_and_receipts_for_test()
@@ -417,7 +686,7 @@ class PairedCodexTests(unittest.TestCase):
                 )
                 self.assertFalse(report.publishable)
                 self.assertIn(reason, report.incomplete_reasons)
-                self.assertEqual(8, len(report.pairs))
+                self.assertEqual(0, len(report.pairs))
 
     def test_receipts_are_reopened_immediately_before_report(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
@@ -1112,6 +1381,7 @@ class PairedCodexTests(unittest.TestCase):
                 "tp": 1,
                 "fp": 1,
                 "fn": 0,
+                "matched_required": 0,
                 "precision": 0.5,
                 "recall": 1.0,
                 "f1": 2 / 3,
@@ -1183,16 +1453,17 @@ class PairedCodexTests(unittest.TestCase):
                     paired_codex.load_results(path)
                 self.assertEqual(original, path.read_bytes())
 
-    def test_rejected_score_with_nonzero_fn_remains_possible_without_severity_identities(self):
+    def test_rejected_score_with_missing_expected_finding_remains_possible(self):
         schedule = fake_schedule()
         row = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
         row["score"] = {
-            "tp": 4,
+            "tp": 0,
             "fp": 0,
             "fn": 1,
-            "precision": 1.0,
-            "recall": 0.8,
-            "f1": 2 * 1.0 * 0.8 / (1.0 + 0.8),
+            "matched_required": 0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
             "accepted": False,
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -1436,6 +1707,7 @@ class PairedCodexTests(unittest.TestCase):
         )
         score = paired_codex.score_findings(expected, predicted)
         self.assertEqual((1, 1, 0), (score.tp, score.fp, score.fn))
+        self.assertEqual(1, score.matched_required)
         self.assertEqual((0.5, 1.0, 2 / 3), (score.precision, score.recall, score.f1))
         self.assertFalse(score.accepted)
 
@@ -1447,6 +1719,7 @@ class PairedCodexTests(unittest.TestCase):
         self.assertEqual((0, 0, 1, 0.0, 0.0, 0.0, False), (
             score.tp, score.fp, score.fn, score.precision, score.recall, score.f1, score.accepted
         ))
+        self.assertEqual(0, score.matched_required)
 
     def test_unmatched_high_finding_blocks_acceptance(self):
         expected = (
@@ -1456,7 +1729,9 @@ class PairedCodexTests(unittest.TestCase):
         predicted = (
             paired_codex.Finding("subject/b.py", 1, 1, "correctness", "low", "found"),
         )
-        self.assertFalse(paired_codex.score_findings(expected, predicted).accepted)
+        score = paired_codex.score_findings(expected, predicted)
+        self.assertEqual(0, score.matched_required)
+        self.assertFalse(score.accepted)
 
     def test_case_hash_binds_manifest_dag_and_oracle(self):
         case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
