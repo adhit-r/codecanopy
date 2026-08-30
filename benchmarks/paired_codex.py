@@ -29,6 +29,7 @@ _CASE_LIMITS = {"task": 16_384, "copy_manifest": 65_536, "dag": 65_536, "oracle"
 _MAX_SUBJECT_BYTES = 1_048_576
 _CATEGORIES = frozenset({"correctness", "reliability", "security"})
 _SEVERITIES = frozenset({"low", "medium", "high", "critical"})
+MAX_MODEL_FINDINGS_BYTES = _CASE_LIMITS["oracle"]
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,12 @@ class Finding:
     category: str
     severity: str
     description: str
+
+
+@dataclass(frozen=True)
+class ParsedFindings:
+    findings: tuple[Finding, ...] | None
+    incomplete_reasons: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -150,6 +157,46 @@ def _number(value: object, field: str) -> float:
     return number
 
 
+def _parse_findings(
+    raw_findings: object,
+    subject_paths: set[str],
+    source_lines: Mapping[str, Sequence[str]],
+    label: str,
+) -> tuple[Finding, ...]:
+    if not isinstance(raw_findings, list):
+        raise ValueError(f"{label} findings must be a list")
+    findings: list[Finding] = []
+    intervals: dict[str, list[tuple[int, int]]] = {}
+    for raw_finding in raw_findings:
+        if not isinstance(raw_finding, dict) or set(raw_finding) != {
+            "file", "start_line", "end_line", "category", "severity", "description"
+        }:
+            raise ValueError(f"{label} findings must use the exact finding schema")
+        file = _relative_path(raw_finding["file"])
+        start_line, end_line = raw_finding["start_line"], raw_finding["end_line"]
+        category, severity, description = (
+            raw_finding["category"], raw_finding["severity"], raw_finding["description"]
+        )
+        if file not in subject_paths:
+            raise ValueError(f"{label} files must be manifest subject files")
+        if (isinstance(start_line, bool) or not isinstance(start_line, int)
+                or isinstance(end_line, bool) or not isinstance(end_line, int)
+                or start_line < 1 or end_line < start_line):
+            raise ValueError(f"{label} line range is invalid")
+        if end_line > len(source_lines[file]):
+            raise ValueError(f"{label} line range exceeds source file")
+        if category not in _CATEGORIES or severity not in _SEVERITIES:
+            raise ValueError(f"{label} category or severity is unknown")
+        if not isinstance(description, str) or not description or len(description) > 8_192:
+            raise ValueError(f"{label} description is invalid")
+        if any(start_line <= prior_end and prior_start <= end_line
+               for prior_start, prior_end in intervals.get(file, ())):
+            raise ValueError(f"{label} findings must not overlap")
+        intervals.setdefault(file, []).append((start_line, end_line))
+        findings.append(Finding(file, start_line, end_line, category, severity, description))
+    return tuple(findings)
+
+
 def load_case_definition(case_directory: str | Path) -> CaseDefinition:
     root = Path(case_directory)
     task_bytes = _read_exact_limited(root / "task.txt", _CASE_LIMITS["task"])
@@ -222,39 +269,29 @@ def load_case_definition(case_directory: str | Path) -> CaseDefinition:
         raise ValueError("DAG scopes must cover every manifest subject file")
 
     raw_oracle = _json_object(root / "oracle.json", _CASE_LIMITS["oracle"], {"findings"})
-    raw_findings = raw_oracle["findings"]
-    if not isinstance(raw_findings, list):
-        raise ValueError("oracle findings must be a list")
-    oracle: list[Finding] = []
-    intervals: dict[str, list[tuple[int, int]]] = {}
-    for raw_finding in raw_findings:
-        if not isinstance(raw_finding, dict) or set(raw_finding) != {
-            "file", "start_line", "end_line", "category", "severity", "description"
-        }:
-            raise ValueError("oracle findings must use the exact finding schema")
-        file = _relative_path(raw_finding["file"])
-        start_line, end_line = raw_finding["start_line"], raw_finding["end_line"]
-        category, severity, description = (
-            raw_finding["category"], raw_finding["severity"], raw_finding["description"]
-        )
-        if file not in subject_paths:
-            raise ValueError("oracle files must be manifest subject files")
-        if (isinstance(start_line, bool) or not isinstance(start_line, int)
-                or isinstance(end_line, bool) or not isinstance(end_line, int)
-                or start_line < 1 or end_line < start_line):
-            raise ValueError("oracle line range is invalid")
-        if end_line > len(source_lines[file]):
-            raise ValueError("oracle line range exceeds source file")
-        if category not in _CATEGORIES or severity not in _SEVERITIES:
-            raise ValueError("oracle category or severity is unknown")
-        if not isinstance(description, str) or not description or len(description) > 8_192:
-            raise ValueError("oracle description is invalid")
-        if any(start_line <= prior_end and prior_start <= end_line for prior_start, prior_end in intervals.get(file, ())):
-            raise ValueError("oracle findings must not overlap")
-        intervals.setdefault(file, []).append((start_line, end_line))
-        oracle.append(Finding(file, start_line, end_line, category, severity, description))
+    oracle = _parse_findings(raw_oracle["findings"], subject_paths, source_lines, "oracle")
 
-    return CaseDefinition(root.name, root, task, copy_manifest, tuple(dag), tuple(oracle))
+    return CaseDefinition(root.name, root, task, copy_manifest, tuple(dag), oracle)
+
+
+def parse_model_findings(output: str, case: CaseDefinition) -> ParsedFindings:
+    try:
+        if len(output.encode("utf-8")) > MAX_MODEL_FINDINGS_BYTES:
+            return ParsedFindings(None, ("model_findings_output_limit",))
+        raw = json.loads(output)
+        if not isinstance(raw, dict) or set(raw) != {"findings"}:
+            raise ValueError("model findings must use the exact root schema")
+        subject_paths = {path for path in case.copy_manifest if path.startswith("subject/")}
+        source_lines = {
+            path: _read_exact_limited(_case_path(case.root, path), _MAX_SUBJECT_BYTES)
+            .decode("utf-8").splitlines()
+            for path in subject_paths
+        }
+        return ParsedFindings(
+            _parse_findings(raw["findings"], subject_paths, source_lines, "model"), ()
+        )
+    except (UnicodeError, json.JSONDecodeError, ValueError):
+        return ParsedFindings(None, ("invalid_model_findings",))
 
 
 def canonical_case_definition_hash(case: CaseDefinition) -> str:

@@ -30,6 +30,55 @@ OBSERVED_JSONL = "\n".join((
 
 
 class PairedCodexTests(unittest.TestCase):
+    def test_model_finding_parser_normalizes_manifest_paths(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        parsed = paired_codex.parse_model_findings(json.dumps({"findings": [{
+            "file": "subject/./percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "description": "division by zero",
+        }]}), case)
+        self.assertEqual((), parsed.incomplete_reasons)
+        self.assertEqual((paired_codex.Finding(
+            "subject/percentage.py", 2, 2, "correctness", "medium", "division by zero"
+        ),), parsed.findings)
+
+    def test_model_finding_parser_marks_malformed_or_oversized_output_incomplete(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        for output in ("not JSON", " " * (paired_codex.MAX_MODEL_FINDINGS_BYTES + 1)):
+            with self.subTest(output_size=len(output)):
+                parsed = paired_codex.parse_model_findings(output, case)
+                self.assertIsNone(parsed.findings)
+                self.assertTrue(parsed.incomplete_reasons)
+
+    def test_model_finding_parser_requires_the_oracle_contract(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        valid = {
+            "file": "subject/percentage.py",
+            "start_line": 2,
+            "end_line": 2,
+            "category": "correctness",
+            "severity": "medium",
+            "description": "division by zero",
+        }
+        invalid_findings = (
+            {**valid, "extra": "field"},
+            {**valid, "file": "task.txt"},
+            {**valid, "category": "unknown"},
+            {**valid, "severity": "unknown"},
+            {**valid, "start_line": 0},
+            {**valid, "start_line": 2, "end_line": 1},
+            {**valid, "end_line": 3},
+            {**valid, "description": ""},
+        )
+        for finding in invalid_findings:
+            with self.subTest(finding=finding):
+                parsed = paired_codex.parse_model_findings(json.dumps({"findings": [finding]}), case)
+                self.assertIsNone(parsed.findings)
+                self.assertTrue(parsed.incomplete_reasons)
+
     def test_scorer_is_one_to_one_and_counts_duplicates_as_false_positives(self):
         expected = (
             paired_codex.Finding("subject/a.py", 10, 12, "security", "high", "expected"),
