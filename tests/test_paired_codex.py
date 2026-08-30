@@ -1,4 +1,5 @@
 import io
+from hashlib import sha256
 import json
 import math
 import os
@@ -226,7 +227,316 @@ def complete_canopy_record(schedule):
     )
 
 
+def write_complete_records_and_receipts_for_test(seed=41):
+    schedule = fake_schedule(seed)
+    directory = tempfile.TemporaryDirectory()
+    state_root = Path(directory.name)
+    records = []
+    for entry in schedule.entries:
+        snapshot = next(case for case in schedule.cases if case.case_id == entry.case_id)
+        plan = next(
+            plan for plan in schedule.execution_plans
+            if (plan.case_id, plan.arm) == (entry.case_id, entry.arm)
+        )
+        invocations = []
+        slug = f"{entry.position:03d}-{entry.case_id}-{entry.arm}"
+        for index, planned in enumerate(plan.invocations):
+            output_hash = sha256(f"{entry.position}:{planned.node_id}".encode()).hexdigest()
+            receipt = f"receipts/{slug}/{planned.node_id}.jsonl"
+            path = state_root / receipt
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"output_hash": output_hash}) + "\n", encoding="utf-8")
+            path.chmod(0o600)
+            total_tokens = (100 if entry.arm == "sequential" else 120) if index == len(plan.invocations) - 1 else 0
+            invocations.append(paired_codex.InvocationRecord(
+                node_id=planned.node_id,
+                requested_provider="codex",
+                provider="codex",
+                fallback_used=False,
+                exit_code=0,
+                requested_model=planned.requested_model,
+                requested_reasoning_effort=planned.requested_reasoning_effort,
+                actual_model=planned.requested_model,
+                status="completed",
+                receipt=receipt,
+                output_hash=output_hash,
+                input_tokens=total_tokens,
+                cached_input_tokens=0,
+                cache_write_input_tokens=0,
+                output_tokens=0,
+                reasoning_output_tokens=0,
+                total_tokens=total_tokens,
+                incomplete_reasons=(),
+            ))
+        score = (
+            paired_codex.Score(1, 1, 1, 0.5, 0.5, 0.5, False)
+            if entry.arm == "sequential"
+            else paired_codex.Score(9, 1, 1, 0.9, 0.9, 0.9, True)
+        )
+        contract = schedule.run_contract
+        records.append(paired_codex.ArmRecord(
+            entry=entry,
+            seed=seed,
+            benchmark_version=contract.benchmark_version,
+            scorer_version=contract.scorer_version,
+            baseline=snapshot.baseline,
+            subject_tree_hash=snapshot.subject_tree_hash,
+            case_definition_hash=snapshot.case_definition_hash,
+            routing_config_hash=contract.routing_config_hash,
+            cli_version=contract.cli_version,
+            adapter_fingerprint=contract.adapter_fingerprint,
+            timeout_seconds=contract.timeout_seconds,
+            sandbox=contract.sandbox,
+            acceptance_contract_hash=contract.acceptance_contract_hash,
+            wall_seconds=10.0 if entry.arm == "sequential" else 12.0,
+            invocations=tuple(invocations),
+            score=score,
+            planned_nodes=len(plan.invocations),
+            executed_nodes=len(plan.invocations),
+            failed_nodes=0,
+            pruned_nodes=0,
+            critical_path_nodes=1 if entry.arm == "sequential" else 2,
+            completion_state="complete",
+            incomplete_reasons=(),
+        ))
+    return schedule, tuple(records), state_root, directory
+
+
 class PairedCodexTests(unittest.TestCase):
+    def test_all_nine_complete_pairs_are_required_for_publication(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        report = paired_codex.calculate_report(schedule, records, state_root=state_root)
+        self.assertTrue(report.publishable)
+        self.assertEqual((9, 18), (len(report.pairs), report.sample_count))
+        self.assertEqual((20.0, 20.0, 0.4), (
+            report.median_token_delta_percent,
+            report.median_time_delta_percent,
+            report.median_quality_delta,
+        ))
+        self.assertEqual((0.0, 1.0), (
+            report.sequential_pass_rate, report.canopy_pass_rate
+        ))
+        blocked = paired_codex.calculate_report(
+            schedule, records[:-1], state_root=state_root
+        )
+        self.assertFalse(blocked.publishable)
+        self.assertIn("all_nine_pairs_required", blocked.incomplete_reasons)
+
+    def test_pair_fairness_mismatches_block_the_affected_delta(self):
+        schedule, complete, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        cases = (
+            ("baseline", "f" * 40, "baseline_mismatch"),
+            ("subject_tree_hash", "e" * 40, "subject_tree_mismatch"),
+            ("case_definition_hash", "d" * 64, "case_definition_mismatch"),
+            ("scorer_version", "finding-overlap-v2", "run_contract_mismatch"),
+            ("cli_version", "codex-cli 0.148.0", "run_contract_mismatch"),
+            ("adapter_fingerprint", "c" * 64, "run_contract_mismatch"),
+            ("routing_config_hash", "d" * 64, "run_contract_mismatch"),
+            ("timeout_seconds", 121.0, "run_contract_mismatch"),
+            ("sandbox", "workspace-write", "run_contract_mismatch"),
+            ("acceptance_contract_hash", "b" * 64, "run_contract_mismatch"),
+        )
+        for field, value, reason in cases:
+            with self.subTest(field=field):
+                changed = (replace(complete[0], **{field: value}), *complete[1:])
+                report = paired_codex.calculate_report(schedule, changed, state_root=state_root)
+                self.assertFalse(report.publishable)
+                self.assertIn(reason, report.incomplete_reasons)
+                self.assertEqual(8, len(report.pairs))
+
+    def test_cross_repetition_and_schedule_authority_mismatches_block_publication(self):
+        schedule, complete, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        changed_index = next(
+            index for index, record in enumerate(complete)
+            if record.entry.case_id == "small" and record.entry.repetition == 2
+        )
+        for field, value, reason in (
+            ("baseline", "f" * 40, "baseline_changed_across_repetitions"),
+            ("subject_tree_hash", "e" * 40, "subject_tree_changed_across_repetitions"),
+            ("case_definition_hash", "d" * 64, "case_definition_changed_across_repetitions"),
+            ("routing_config_hash", "d" * 64, "run_contract_changed_across_repetitions"),
+            ("scorer_version", "finding-overlap-v2", "run_contract_changed_across_repetitions"),
+        ):
+            with self.subTest(field=field):
+                records = list(complete)
+                records[changed_index] = replace(records[changed_index], **{field: value})
+                report = paired_codex.calculate_report(schedule, records, state_root=state_root)
+                self.assertFalse(report.publishable)
+                self.assertIn(reason, report.incomplete_reasons)
+        agreed_wrong = tuple(replace(record, routing_config_hash="d" * 64) for record in complete)
+        report = paired_codex.calculate_report(schedule, agreed_wrong, state_root=state_root)
+        self.assertFalse(report.publishable)
+        self.assertIn("schedule_contract_mismatch", report.incomplete_reasons)
+
+    def test_persisted_execution_plan_is_the_only_requested_settings_authority(self):
+        schedule, complete, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        first = complete[0]
+        invocation = first.invocations[0]
+        for changes, reason in (
+            ({"requested_model": "gpt-5.6-luna"}, "requested_model_mismatch"),
+            ({"requested_reasoning_effort": "low"}, "requested_effort_mismatch"),
+            ({"actual_model": "gpt-5.6-luna"}, "actual_model_mismatch"),
+        ):
+            with self.subTest(reason=reason):
+                changed = replace(first, invocations=(replace(invocation, **changes),))
+                report = paired_codex.calculate_report(
+                    schedule, (changed, *complete[1:]), state_root=state_root
+                )
+                self.assertFalse(report.publishable)
+                self.assertIn(reason, report.incomplete_reasons)
+
+    def test_incomplete_malformed_truncated_and_zero_baseline_records_block_deltas(self):
+        schedule, complete, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        first = complete[0]
+        invocation = first.invocations[0]
+        cases = (
+            (replace(first, completion_state="incomplete", incomplete_reasons=("malformed_result",)),
+             "malformed_result"),
+            (replace(first, score=None), "incomplete_score"),
+            (replace(first, invocations=(replace(invocation, status="failed"),)),
+             "invocation_incomplete"),
+            (replace(first, invocations=(replace(
+                invocation, incomplete_reasons=("provider_output_limit",)
+            ),)), "output_truncated"),
+            (replace(first, invocations=(replace(invocation, total_tokens=None),)),
+             "provider_usage_missing"),
+            (replace(first, invocations=(replace(
+                invocation, input_tokens=0, output_tokens=0, total_tokens=0
+            ),)), "zero_sequential_tokens"),
+            (replace(first, wall_seconds=0.0), "zero_sequential_time"),
+        )
+        for changed, reason in cases:
+            with self.subTest(reason=reason):
+                report = paired_codex.calculate_report(
+                    schedule, (changed, *complete[1:]), state_root=state_root
+                )
+                self.assertFalse(report.publishable)
+                self.assertIn(reason, report.incomplete_reasons)
+                self.assertEqual(8, len(report.pairs))
+
+    def test_receipts_are_reopened_immediately_before_report(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        self.assertTrue(paired_codex.calculate_report(
+            schedule, records, state_root=state_root
+        ).publishable)
+        receipt = state_root / records[0].invocations[0].receipt
+        receipt.write_text(json.dumps({"output_hash": "f" * 64}) + "\n", encoding="utf-8")
+        receipt.chmod(0o600)
+        report = paired_codex.calculate_report(schedule, records, state_root=state_root)
+        self.assertFalse(report.publishable)
+        self.assertIn("receipt_audit_failed", report.incomplete_reasons)
+
+    def test_exact_delta_formulas_and_zero_denominators(self):
+        delta = paired_codex.calculate_pair_delta(
+            sequential_tokens=100,
+            canopy_tokens=75,
+            sequential_seconds=10.0,
+            canopy_seconds=12.0,
+            sequential_f1=0.5,
+            canopy_f1=0.9,
+        )
+        self.assertEqual((-25.0, 20.0, 0.4), (
+            delta.token_delta_percent, delta.time_delta_percent, delta.quality_delta
+        ))
+        for field in ("sequential_tokens", "sequential_seconds"):
+            values = dict(
+                sequential_tokens=100,
+                canopy_tokens=75,
+                sequential_seconds=10.0,
+                canopy_seconds=12.0,
+                sequential_f1=0.5,
+                canopy_f1=0.9,
+            )
+            values[field] = 0
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "zero"):
+                paired_codex.calculate_pair_delta(**values)
+
+    def test_report_cli_loads_schedule_and_records_from_private_ledger(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        results = state_root / "results.jsonl"
+        paired_codex.append_result_record(results, {"kind": "schedule", **asdict(schedule)})
+        for record in records:
+            paired_codex.append_result_record(results, {"kind": "arm-result", **asdict(record)})
+        output = io.StringIO()
+        with patch.object(paired_codex, "_build_command_schedule") as rebuild, redirect_stdout(output):
+            status = paired_codex.main([
+                "report", "--results", str(results), "--state-dir", str(state_root)
+            ])
+        self.assertEqual(0, status)
+        self.assertTrue(json.loads(output.getvalue())["publishable"])
+        rebuild.assert_not_called()
+
+    def test_dry_run_commands_and_full_run_refusal_never_dispatch(self):
+        for command in ("probe", "acceptance", "run"):
+            with self.subTest(command=command), patch.object(
+                paired_codex, "execute_provider"
+            ) as execute, redirect_stdout(io.StringIO()):
+                self.assertEqual(0, paired_codex.main([command]))
+                execute.assert_not_called()
+        schedule = fake_schedule()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results.jsonl"
+            output = io.StringIO()
+            with patch.object(
+                paired_codex, "_build_command_schedule", return_value=(
+                    schedule, fake_case_definitions(), fake_routing_config()
+                )
+            ), patch.object(paired_codex, "execute_provider") as execute, redirect_stdout(output):
+                status = paired_codex.main([
+                    "run", "--execute", "--results", str(results),
+                    "--state-dir", str(root), "--seed", "41",
+                ])
+            loaded, records = paired_codex.load_results(results)
+        self.assertEqual(1, status)
+        self.assertEqual((schedule, ()), (loaded, records))
+        self.assertIn("actual_model_unavailable", output.getvalue())
+        execute.assert_not_called()
+
+    def test_acceptance_executes_only_first_small_pair_with_mocked_arms(self):
+        schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        by_entry = {record.entry: record for record in records}
+        calls = []
+
+        def fake_runner(_case, entry, _config, _contract, _snapshot, _plan, **kwargs):
+            calls.append(entry)
+            record = by_entry[entry]
+            paired_codex.append_result_record(
+                kwargs["results_path"], {"kind": "arm-result", **asdict(record)}
+            )
+            return record
+
+        results = state_root / "acceptance.jsonl"
+        output = io.StringIO()
+        with patch.object(
+            paired_codex, "_build_command_schedule", return_value=(
+                schedule, fake_case_definitions(), fake_routing_config()
+            )
+        ), patch.object(
+            paired_codex, "run_sequential_arm", side_effect=fake_runner
+        ), patch.object(
+            paired_codex, "run_canopy_arm", side_effect=fake_runner
+        ), patch.object(paired_codex, "execute_provider") as execute, redirect_stdout(output):
+            status = paired_codex.main([
+                "acceptance", "--execute", "--results", str(results),
+                "--state-dir", str(state_root), "--seed", "41",
+            ])
+        report = json.loads(output.getvalue())
+        self.assertEqual(0, status)
+        self.assertEqual(list(schedule.entries[:2]), calls)
+        self.assertEqual({"small"}, {entry.case_id for entry in calls})
+        self.assertFalse(report["publishable"])
+        self.assertIn("all_nine_pairs_required", report["incomplete_reasons"])
+        execute.assert_not_called()
+
     def test_seeded_schedule_has_nine_pairs_and_eighteen_unique_positions(self):
         contract = fake_run_contract()
         cases = fake_case_snapshots()

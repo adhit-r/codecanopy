@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 from random import Random
+from statistics import median
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,7 @@ from benchmarks.model_routing import (
     REASONING_EFFORTS,
     NodeSignal,
     RoutingConfig,
+    load_config,
     route_node,
 )
 
@@ -477,6 +479,267 @@ class ArmRecord:
     critical_path_nodes: int
     completion_state: str
     incomplete_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PairDelta:
+    case_id: str
+    repetition: int
+    token_delta_percent: float
+    time_delta_percent: float
+    quality_delta: float
+    sequential_accepted: bool
+    canopy_accepted: bool
+
+
+@dataclass(frozen=True)
+class BenchmarkReport:
+    pairs: tuple[PairDelta, ...]
+    sample_count: int
+    median_token_delta_percent: float | None
+    median_time_delta_percent: float | None
+    median_quality_delta: float | None
+    sequential_pass_rate: float | None
+    canopy_pass_rate: float | None
+    publishable: bool
+    incomplete_reasons: tuple[str, ...]
+
+
+_CONTRACT_FIELDS = (
+    "benchmark_version",
+    "scorer_version",
+    "cli_version",
+    "adapter_fingerprint",
+    "routing_config_hash",
+    "timeout_seconds",
+    "sandbox",
+    "acceptance_contract_hash",
+)
+_SNAPSHOT_REASONS = {
+    "baseline": "baseline_mismatch",
+    "subject_tree_hash": "subject_tree_mismatch",
+    "case_definition_hash": "case_definition_mismatch",
+}
+
+
+def _record_gate_reasons(
+    schedule: BenchmarkSchedule,
+    record: ArmRecord,
+    state_root: Path,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    contract = schedule.run_contract
+    if record.seed != schedule.seed or any(
+        getattr(record, field) != getattr(contract, field) for field in _CONTRACT_FIELDS
+    ):
+        reasons.extend(("schedule_contract_mismatch", "run_contract_mismatch"))
+    snapshot = next(
+        (case for case in schedule.cases if case.case_id == record.entry.case_id), None
+    )
+    if snapshot is None:
+        reasons.append("schedule_case_mismatch")
+    else:
+        for field, reason in _SNAPSHOT_REASONS.items():
+            if getattr(record, field) != getattr(snapshot, field):
+                reasons.extend(("schedule_case_mismatch", reason))
+    plan = next(
+        (
+            item for item in schedule.execution_plans
+            if (item.case_id, item.arm) == (record.entry.case_id, record.entry.arm)
+        ),
+        None,
+    )
+    if plan is None or len(record.invocations) != len(plan.invocations):
+        reasons.append("invocation_incomplete")
+    if plan is not None:
+        for invocation, planned in zip(record.invocations, plan.invocations):
+            if invocation.node_id != planned.node_id or invocation.requested_model != planned.requested_model:
+                reasons.append("requested_model_mismatch")
+            if invocation.requested_reasoning_effort != planned.requested_reasoning_effort:
+                reasons.append("requested_effort_mismatch")
+    for invocation in record.invocations:
+        if invocation.status != "completed" or invocation.fallback_used:
+            reasons.append("invocation_incomplete")
+        if invocation.actual_model is None:
+            reasons.append("actual_model_unavailable")
+        elif invocation.actual_model != invocation.requested_model:
+            reasons.append("actual_model_mismatch")
+        if any(token is None for token in (
+            invocation.input_tokens,
+            invocation.cached_input_tokens,
+            invocation.cache_write_input_tokens,
+            invocation.output_tokens,
+            invocation.reasoning_output_tokens,
+            invocation.total_tokens,
+        )):
+            reasons.append("provider_usage_missing")
+        if "provider_output_limit" in invocation.incomplete_reasons or "output_truncated" in invocation.incomplete_reasons:
+            reasons.append("output_truncated")
+        reasons.extend(invocation.incomplete_reasons)
+        try:
+            audit_proof_receipt(state_root, invocation.receipt, invocation.output_hash)
+        except (OSError, ValueError):
+            reasons.append("receipt_audit_failed")
+    if record.score is None:
+        reasons.append("incomplete_score")
+    if record.completion_state != "complete":
+        reasons.extend(record.incomplete_reasons or ("malformed_result",))
+    else:
+        reasons.extend(record.incomplete_reasons)
+    return tuple(dict.fromkeys(reasons))
+
+
+def _pair_gate_reasons(sequential: ArmRecord, canopy: ArmRecord) -> tuple[str, ...]:
+    reasons: list[str] = []
+    for field, reason in _SNAPSHOT_REASONS.items():
+        if getattr(sequential, field) != getattr(canopy, field):
+            reasons.append(reason)
+    if any(
+        getattr(sequential, field) != getattr(canopy, field)
+        for field in _CONTRACT_FIELDS
+    ):
+        reasons.append("run_contract_mismatch")
+    sequential_tokens = sum(
+        invocation.total_tokens or 0 for invocation in sequential.invocations
+    )
+    if sequential_tokens == 0:
+        reasons.append("zero_sequential_tokens")
+    if sequential.wall_seconds == 0:
+        reasons.append("zero_sequential_time")
+    return tuple(reasons)
+
+
+def publication_gate(
+    schedule: BenchmarkSchedule,
+    records: Sequence[ArmRecord],
+    state_root: Path,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    expected_entries = set(schedule.entries)
+    grouped: dict[tuple[str, int], dict[str, list[ArmRecord]]] = {}
+    for record in records:
+        if not isinstance(record, ArmRecord) or record.entry not in expected_entries:
+            reasons.append("malformed_result")
+            continue
+        grouped.setdefault(
+            (record.entry.case_id, record.entry.repetition), {}
+        ).setdefault(record.entry.arm, []).append(record)
+        reasons.extend(_record_gate_reasons(schedule, record, Path(state_root)))
+    for case_id in _CASE_IDS:
+        case_records = [record for record in records if record.entry.case_id == case_id]
+        for field, reason in (
+            ("baseline", "baseline_changed_across_repetitions"),
+            ("subject_tree_hash", "subject_tree_changed_across_repetitions"),
+            ("case_definition_hash", "case_definition_changed_across_repetitions"),
+        ):
+            if len({getattr(record, field) for record in case_records}) > 1:
+                reasons.append(reason)
+        if any(
+            len({getattr(record, field) for record in case_records}) > 1
+            for field in _CONTRACT_FIELDS
+        ):
+            reasons.append("run_contract_changed_across_repetitions")
+    complete_pairs = 0
+    for case_id in _CASE_IDS:
+        for repetition in range(1, 4):
+            arms = grouped.get((case_id, repetition), {})
+            if len(arms.get("sequential", ())) != 1 or len(arms.get("canopy", ())) != 1:
+                continue
+            sequential = arms["sequential"][0]
+            canopy = arms["canopy"][0]
+            pair_reasons = (
+                *_record_gate_reasons(schedule, sequential, Path(state_root)),
+                *_record_gate_reasons(schedule, canopy, Path(state_root)),
+                *_pair_gate_reasons(sequential, canopy),
+            )
+            reasons.extend(pair_reasons)
+            if not pair_reasons:
+                complete_pairs += 1
+    if complete_pairs != 9 or len(records) != 18:
+        reasons.append("all_nine_pairs_required")
+    return tuple(dict.fromkeys(reasons))
+
+
+def calculate_pair_delta(
+    *,
+    sequential_tokens: int,
+    canopy_tokens: int,
+    sequential_seconds: float,
+    canopy_seconds: float,
+    sequential_f1: float,
+    canopy_f1: float,
+    case_id: str = "",
+    repetition: int = 0,
+    sequential_accepted: bool = False,
+    canopy_accepted: bool = False,
+) -> PairDelta:
+    if sequential_tokens == 0 or sequential_seconds == 0:
+        raise ValueError("pair delta baseline must be non-zero")
+    return PairDelta(
+        case_id=case_id,
+        repetition=repetition,
+        token_delta_percent=100 * (canopy_tokens - sequential_tokens) / sequential_tokens,
+        time_delta_percent=100 * (canopy_seconds - sequential_seconds) / sequential_seconds,
+        quality_delta=canopy_f1 - sequential_f1,
+        sequential_accepted=sequential_accepted,
+        canopy_accepted=canopy_accepted,
+    )
+
+
+def calculate_report(
+    schedule: BenchmarkSchedule,
+    records: Sequence[ArmRecord],
+    *,
+    state_root: Path,
+) -> BenchmarkReport:
+    incomplete_reasons = publication_gate(schedule, records, Path(state_root))
+    pairs: list[PairDelta] = []
+    for case_id in _CASE_IDS:
+        for repetition in range(1, 4):
+            candidates = [
+                record for record in records
+                if (record.entry.case_id, record.entry.repetition) == (case_id, repetition)
+            ]
+            sequential = [record for record in candidates if record.entry.arm == "sequential"]
+            canopy = [record for record in candidates if record.entry.arm == "canopy"]
+            if len(sequential) != 1 or len(canopy) != 1:
+                continue
+            left, right = sequential[0], canopy[0]
+            if (
+                _record_gate_reasons(schedule, left, Path(state_root))
+                or _record_gate_reasons(schedule, right, Path(state_root))
+                or _pair_gate_reasons(left, right)
+                or left.score is None
+                or right.score is None
+            ):
+                continue
+            pairs.append(calculate_pair_delta(
+                case_id=case_id,
+                repetition=repetition,
+                sequential_tokens=sum(item.total_tokens or 0 for item in left.invocations),
+                canopy_tokens=sum(item.total_tokens or 0 for item in right.invocations),
+                sequential_seconds=left.wall_seconds,
+                canopy_seconds=right.wall_seconds,
+                sequential_f1=left.score.f1,
+                canopy_f1=right.score.f1,
+                sequential_accepted=left.score.accepted,
+                canopy_accepted=right.score.accepted,
+            ))
+    return BenchmarkReport(
+        pairs=tuple(pairs),
+        sample_count=len(records),
+        median_token_delta_percent=median(pair.token_delta_percent for pair in pairs) if pairs else None,
+        median_time_delta_percent=median(pair.time_delta_percent for pair in pairs) if pairs else None,
+        median_quality_delta=median(pair.quality_delta for pair in pairs) if pairs else None,
+        sequential_pass_rate=(
+            sum(pair.sequential_accepted for pair in pairs) / len(pairs) if pairs else None
+        ),
+        canopy_pass_rate=(
+            sum(pair.canopy_accepted for pair in pairs) / len(pairs) if pairs else None
+        ),
+        publishable=len(pairs) == 9 and not incomplete_reasons,
+        incomplete_reasons=incomplete_reasons,
+    )
 
 
 def _arm_result_error() -> ValueError:
@@ -1919,6 +2182,104 @@ def _print(data: Mapping[str, object]) -> None:
     print(json.dumps(data, sort_keys=True))
 
 
+def _execution_intent(command: str) -> dict[str, object]:
+    return {
+        "command": command,
+        "execute": False,
+        "provider": "codex",
+        "sandbox": "read-only",
+    }
+
+
+def _build_command_schedule(
+    seed: int,
+) -> tuple[BenchmarkSchedule, tuple[CaseDefinition, ...], RoutingConfig]:
+    config_path = (
+        Path(__file__).resolve().parents[1]
+        / "plugins/code-canopy/skills/code-canopy/assets/codecanopy.toml"
+    )
+    config = load_config(config_path)
+    cases = tuple(load_case_definition(CASE_ROOT / case_id) for case_id in _CASE_IDS)
+    with tempfile.TemporaryDirectory() as directory:
+        snapshots = []
+        for case in cases:
+            _, baseline, subject_tree_hash = copy_case_repo(case, Path(directory))
+            snapshots.append(CaseSnapshot(
+                case.case_id,
+                baseline,
+                subject_tree_hash,
+                canonical_case_definition_hash(case),
+            ))
+    acceptance_payload = json.dumps(
+        {"precision": 0.8, "recall": 0.8, "high_critical_required": True},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    contract = RunContract(
+        benchmark_version=CASE_ROOT.name,
+        scorer_version="finding-overlap-v1",
+        cli_version=CODEX_0147.cli_version,
+        adapter_fingerprint=adapter_fingerprint(),
+        routing_config_hash=sha256(config_path.read_bytes()).hexdigest(),
+        timeout_seconds=120,
+        sandbox="read-only",
+        acceptance_contract_hash=sha256(acceptance_payload).hexdigest(),
+    )
+    return build_schedule(seed, contract, snapshots, cases, config), cases, config
+
+
+def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecord, ...]:
+    if path.exists() and path.stat().st_size:
+        existing, records = load_results(path)
+        if existing != schedule or records:
+            raise ValueError("benchmark results already contain a different or started run")
+        return records
+    append_result_record(path, {"kind": "schedule", **asdict(schedule)})
+    return ()
+
+
+def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
+    schedule, cases, config = _build_command_schedule(seed)
+    _persist_schedule(results, schedule)
+    definitions = {case.case_id: case for case in cases}
+    for entry in schedule.entries[:2]:
+        case = definitions[entry.case_id]
+        snapshot = next(item for item in schedule.cases if item.case_id == entry.case_id)
+        plan = next(
+            item for item in schedule.execution_plans
+            if (item.case_id, item.arm) == (entry.case_id, entry.arm)
+        )
+        runner = run_sequential_arm if entry.arm == "sequential" else run_canopy_arm
+        runner(
+            case,
+            entry,
+            config,
+            schedule.run_contract,
+            snapshot,
+            plan,
+            seed=seed,
+            state_root=state_root,
+            results_path=results,
+        )
+    loaded_schedule, records = load_results(results)
+    _print(asdict(calculate_report(loaded_schedule, records, state_root=state_root)))
+    return 0
+
+
+def _run_command(results: Path, seed: int) -> int:
+    schedule, _, _ = _build_command_schedule(seed)
+    _persist_schedule(results, schedule)
+    if CODEX_0147.actual_model_path is None:
+        _print({
+            "command": "run",
+            "execute": False,
+            "incomplete_reasons": ["actual_model_unavailable"],
+            "schedule_entries": len(schedule.entries),
+        })
+        return 1
+    raise RuntimeError("unreachable until a reviewed adapter supplies actual-model evidence")
+
+
 def _execute_probe() -> int:
     capability = provider_capability("codex", probe_version=True)
     if capability.version != CODEX_0147.cli_version:
@@ -1959,13 +2320,37 @@ def _execute_probe() -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("probe",))
-    parser.add_argument("--execute", action="store_true", help="run the opt-in local Codex probe")
+    commands = parser.add_subparsers(dest="command", required=True)
+    probe = commands.add_parser("probe")
+    probe.add_argument("--execute", action="store_true")
+    for name in ("acceptance", "run"):
+        command = commands.add_parser(name)
+        command.add_argument("--execute", action="store_true")
+        command.add_argument("--results", type=Path)
+        command.add_argument("--state-dir", type=Path)
+        command.add_argument("--seed", type=int)
+    report = commands.add_parser("report")
+    report.add_argument("--results", type=Path, required=True)
+    report.add_argument("--state-dir", type=Path, required=True)
     args = parser.parse_args(argv)
-    if not args.execute:
-        _print(_probe_summary(execute=False))
+    if args.command == "report":
+        schedule, records = load_results(args.results)
+        _print(asdict(calculate_report(schedule, records, state_root=args.state_dir)))
         return 0
-    return _execute_probe()
+    if not args.execute:
+        _print(
+            _probe_summary(execute=False)
+            if args.command == "probe"
+            else _execution_intent(args.command)
+        )
+        return 0
+    if args.command == "probe":
+        return _execute_probe()
+    if args.results is None or args.state_dir is None or args.seed is None:
+        parser.error("--execute requires --results, --state-dir, and --seed")
+    if args.command == "acceptance":
+        return _acceptance_command(args.results, args.state_dir, args.seed)
+    return _run_command(args.results, args.seed)
 
 
 if __name__ == "__main__":
