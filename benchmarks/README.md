@@ -42,6 +42,28 @@ time_delta_percent  = 100 * (canopy_wall_seconds - baseline_wall_seconds) / base
 
 Compare quality through the same predeclared acceptance checks or blinded rubric. Report pass rates beside token and time deltas; a cheaper failed run is not an improvement. Report medians and the complete sample count, not only the best run.
 
+### Codex CLI local harness
+
+Probe the installed CLI before any execution:
+
+```sh
+python3 benchmarks/paired_codex.py probe
+```
+
+Run the owner-only small acceptance pair and inspect its local report with:
+
+```sh
+python3 benchmarks/paired_codex.py acceptance --execute \
+  --results .codecanopy/benchmarks/codex-readonly-v1-results.jsonl \
+  --state-dir .codecanopy/benchmarks/codex-readonly-v1-state \
+  --seed 41
+python3 benchmarks/paired_codex.py report \
+  --results .codecanopy/benchmarks/codex-readonly-v1-results.jsonl \
+  --state-dir .codecanopy/benchmarks/codex-readonly-v1-state
+```
+
+The 2026-08-30 Codex CLI 0.147.0 probe exposed cumulative token usage but no actual-model identity. A requested model is not treated as an actual model. The full pilot and comparative chart are therefore blocked. Local small-pair wall-time, token, and deterministic-quality observations are incomplete evidence and must not be marketed as gains.
+
 ## Publication gate
 
 Publish a comparative chart only when both arms have complete provider-reported usage, immutable baselines, identical acceptance criteria, and receipt-backed actual provider/model identities. Label synthetic scheduler fixtures as synthetic. Until paired results exist, state `not measured` for token, wall-clock, and quality deltas and describe CodeCanopy's graph as a control model, not a proven speedup or globally optimal shortest-path algorithm.
