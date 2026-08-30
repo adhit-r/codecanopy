@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -60,6 +61,27 @@ class PairedCodexTests(unittest.TestCase):
         self.assertNotIn("dag.json", visible)
         self.assertRegex(baseline, r"^[0-9a-f]{40,64}$")
         self.assertRegex(tree_hash, r"^[0-9a-f]{40,64}$")
+
+    def test_baseline_commit_ignores_parent_git_identity_environment(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        first_identity = {
+            "GIT_AUTHOR_NAME": "First Author",
+            "GIT_AUTHOR_EMAIL": "first@example.test",
+            "GIT_COMMITTER_NAME": "First Committer",
+            "GIT_COMMITTER_EMAIL": "first-committer@example.test",
+        }
+        second_identity = {
+            "GIT_AUTHOR_NAME": "Second Author",
+            "GIT_AUTHOR_EMAIL": "second@example.test",
+            "GIT_COMMITTER_NAME": "Second Committer",
+            "GIT_COMMITTER_EMAIL": "second-committer@example.test",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, first_identity):
+                _, first, _ = paired_codex.copy_case_repo(case, Path(directory) / "first")
+            with patch.dict(os.environ, second_identity):
+                _, second, _ = paired_codex.copy_case_repo(case, Path(directory) / "second")
+        self.assertEqual(first, second)
 
     def test_case_loader_rejects_invalid_paths_and_schema(self):
         with tempfile.TemporaryDirectory() as directory:

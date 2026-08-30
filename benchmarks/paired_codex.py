@@ -235,7 +235,15 @@ def copy_case_repo(case: CaseDefinition, destination: str | Path) -> tuple[Path,
                        ("core.autocrlf", "false")):
         subprocess.run(["git", "-C", str(repo), "config", key, value], check=True, capture_output=True, text=True)
     subprocess.run(["git", "-C", str(repo), "add", "--all"], check=True, capture_output=True, text=True)
-    environment = {**os.environ, "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z"}
+    environment = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "CodeCanopy Benchmark",
+        "GIT_AUTHOR_EMAIL": "benchmark@codecanopy.invalid",
+        "GIT_COMMITTER_NAME": "CodeCanopy Benchmark",
+        "GIT_COMMITTER_EMAIL": "benchmark@codecanopy.invalid",
+        "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z",
+        "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z",
+    }
     subprocess.run(
         ["git", "-C", str(repo), "commit", "--quiet", "-m", "CodeCanopy benchmark baseline"],
         check=True, capture_output=True, text=True, env=environment,
