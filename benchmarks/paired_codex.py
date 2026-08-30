@@ -768,12 +768,48 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
         if any(row[name] != getattr(contract, name) for name in contract_fields):
             raise _arm_result_error()
         snapshot = next(case for case in schedule.cases if case.case_id == entry.case_id)
-        if (
-            row["seed"] != schedule.seed
-            or row["baseline"] != snapshot.baseline
-            or row["subject_tree_hash"] != snapshot.subject_tree_hash
-            or row["case_definition_hash"] != snapshot.case_definition_hash
-        ):
+        baseline = _arm_text(row["baseline"])
+        subject_tree_hash = _arm_text(row["subject_tree_hash"])
+        case_definition_hash = _arm_text(row["case_definition_hash"])
+        _hex_identity(baseline, {40, 64}, "baseline")
+        _hex_identity(subject_tree_hash, {40, 64}, "subject tree hash")
+        _hex_identity(case_definition_hash, {64}, "case definition hash")
+        mismatch_reasons = tuple(
+            reason
+            for actual, expected, reason in (
+                (baseline, snapshot.baseline, "baseline_mismatch"),
+                (
+                    subject_tree_hash,
+                    snapshot.subject_tree_hash,
+                    "subject_tree_hash_mismatch",
+                ),
+                (
+                    case_definition_hash,
+                    snapshot.case_definition_hash,
+                    "case_definition_hash_mismatch",
+                ),
+            )
+            if actual != expected
+        )
+        snapshot_reason_names = {
+            "baseline_mismatch",
+            "subject_tree_hash_mismatch",
+            "case_definition_hash_mismatch",
+        }
+        if mismatch_reasons:
+            if (
+                completion_state != "incomplete"
+                or score is not None
+                or invocations
+                or executed != 0
+                or failed != 0
+                or pruned != planned
+                or reasons != mismatch_reasons
+            ):
+                raise _arm_result_error()
+        elif any(reason in snapshot_reason_names for reason in reasons):
+            raise _arm_result_error()
+        if row["seed"] != schedule.seed:
             raise _arm_result_error()
         if isinstance(row["seed"], bool) or not isinstance(row["seed"], int):
             raise _arm_result_error()
@@ -783,9 +819,9 @@ def _arm_from_record(value: object, schedule: BenchmarkSchedule) -> ArmRecord:
             seed=row["seed"],
             benchmark_version=_arm_text(row["benchmark_version"]),
             scorer_version=_arm_text(row["scorer_version"]),
-            baseline=_arm_text(row["baseline"]),
-            subject_tree_hash=_arm_text(row["subject_tree_hash"]),
-            case_definition_hash=_arm_text(row["case_definition_hash"]),
+            baseline=baseline,
+            subject_tree_hash=subject_tree_hash,
+            case_definition_hash=case_definition_hash,
             routing_config_hash=_arm_text(row["routing_config_hash"]),
             cli_version=_arm_text(row["cli_version"]),
             adapter_fingerprint=_arm_text(row["adapter_fingerprint"]),
@@ -1759,7 +1795,13 @@ def run_canopy_arm(
             )
         except KeyboardInterrupt:
             invocations = _leaf_invocations(
-                captures, state_root, receipt_dir, contract, case, leaf_reasons
+                captures,
+                state_root,
+                receipt_dir,
+                contract,
+                case,
+                leaf_reasons,
+                auditable_prefix_only=True,
             )
             interrupted = _arm_record(
                 entry, seed, contract, baseline, tree_hash, case_hash,
@@ -1838,13 +1880,20 @@ def _leaf_invocations(
     contract: RunContract,
     case: CaseDefinition,
     leaf_reasons: Mapping[str, Sequence[str]],
+    *,
+    auditable_prefix_only: bool = False,
 ) -> tuple[InvocationRecord, ...]:
     records = []
     for node_id, request, result, _duration, extra in captures:
         receipt = receipt_dir / f"{node_id}.jsonl"
         reference = receipt.relative_to(state_root).as_posix()
         output_hash = sha256(result.output.encode("utf-8")).hexdigest()
-        audit_proof_receipt(state_root, reference, output_hash)
+        try:
+            audit_proof_receipt(state_root, reference, output_hash)
+        except ValueError:
+            if auditable_prefix_only:
+                break
+            raise
         record, _ = _invocation_record(
             node_id, request, result, reference, contract, case,
             extra_reasons=(*extra, *leaf_reasons.get(node_id, ())),

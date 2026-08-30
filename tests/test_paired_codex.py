@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from benchmarks import paired_codex
 from benchmarks.model_routing import ModelSettings, RoutingConfig
+from runtime import tree as runtime_tree
 from runtime.providers import ProviderCapability, ProviderResult
 
 
@@ -463,6 +464,126 @@ class PairedCodexTests(unittest.TestCase):
         self.assertIsInstance(loaded_records[0].entry, paired_codex.ScheduleEntry)
         self.assertIsInstance(loaded_records[0].invocations[0], paired_codex.InvocationRecord)
         self.assertIsInstance(loaded_records[0].score, paired_codex.Score)
+
+    def test_producer_snapshot_mismatch_records_round_trip_before_dispatch(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "small")
+        actual = real_case_snapshot(case)
+
+        def different(value):
+            digit = "0" if value[0] != "0" else "1"
+            return digit * len(value)
+
+        variants = (
+            ({"baseline": different(actual.baseline)}, ("baseline_mismatch",), "sequential"),
+            ({"subject_tree_hash": different(actual.subject_tree_hash)},
+             ("subject_tree_hash_mismatch",), "sequential"),
+            ({"case_definition_hash": different(actual.case_definition_hash)},
+             ("case_definition_hash_mismatch",), "sequential"),
+            ({
+                "baseline": different(actual.baseline),
+                "subject_tree_hash": different(actual.subject_tree_hash),
+                "case_definition_hash": different(actual.case_definition_hash),
+            }, (
+                "baseline_mismatch",
+                "subject_tree_hash_mismatch",
+                "case_definition_hash_mismatch",
+            ), "canopy"),
+        )
+        definitions = fake_case_definitions()
+        config = fake_routing_config()
+        for changes, expected_reasons, arm in variants:
+            with self.subTest(arm=arm, reasons=expected_reasons):
+                snapshot = replace(actual, **changes)
+                other = fake_case_snapshots()[1:]
+                schedule = paired_codex.build_schedule(
+                    41, fake_run_contract(), (snapshot, *other), definitions, config
+                )
+                entry = next(
+                    item for item in schedule.entries
+                    if (item.case_id, item.repetition, item.arm) == ("small", 1, arm)
+                )
+                plan = next(
+                    item for item in schedule.execution_plans
+                    if (item.case_id, item.arm) == ("small", arm)
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    runner = (
+                        paired_codex.run_sequential_arm
+                        if arm == "sequential"
+                        else paired_codex.run_canopy_arm
+                    )
+                    record = runner(
+                        case, entry, config, fake_run_contract(), snapshot, plan,
+                        seed=41,
+                        state_root=Path(directory),
+                        execute=lambda _request: self.fail("snapshot mismatch dispatched"),
+                        capability=fake_capability,
+                    )
+                    path = Path(directory) / "results.jsonl"
+                    paired_codex.append_result_record(
+                        path, {"kind": "schedule", **asdict(schedule)}
+                    )
+                    paired_codex.append_result_record(
+                        path, {"kind": "arm-result", **asdict(record)}
+                    )
+                    _, loaded = paired_codex.load_results(path)
+                self.assertEqual((record,), loaded)
+                self.assertEqual(expected_reasons, record.incomplete_reasons)
+                self.assertEqual("incomplete", record.completion_state)
+                self.assertEqual((), record.invocations)
+                self.assertIsNone(record.score)
+
+    def test_result_loader_rejects_forged_snapshot_mismatch_shapes(self):
+        schedule = fake_schedule()
+        canonical = {"kind": "arm-result", **asdict(complete_arm_record(schedule))}
+        changed_baseline = "f" * 40
+        if changed_baseline == canonical["baseline"]:
+            changed_baseline = "e" * 40
+
+        def mismatch_after_dispatch(row):
+            row["baseline"] = changed_baseline
+            row["score"] = None
+            row["completion_state"] = "incomplete"
+            row["incomplete_reasons"] = ["baseline_mismatch"]
+
+        def mismatch_without_exact_reason(row):
+            row.update(
+                baseline=changed_baseline,
+                invocations=[],
+                score=None,
+                executed_nodes=0,
+                failed_nodes=0,
+                pruned_nodes=1,
+                completion_state="incomplete",
+                incomplete_reasons=["subject_tree_hash_mismatch"],
+            )
+
+        def forged_reason_without_mismatch(row):
+            row.update(
+                invocations=[],
+                score=None,
+                executed_nodes=0,
+                failed_nodes=0,
+                pruned_nodes=1,
+                completion_state="incomplete",
+                incomplete_reasons=["baseline_mismatch"],
+            )
+
+        for name, mutate in (
+            ("mismatch_after_dispatch", mismatch_after_dispatch),
+            ("mismatch_without_exact_reason", mismatch_without_exact_reason),
+            ("forged_reason_without_mismatch", forged_reason_without_mismatch),
+        ):
+            row = json.loads(json.dumps(canonical))
+            mutate(row)
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                paired_codex.append_result_record(
+                    path, {"kind": "schedule", **asdict(schedule)}
+                )
+                paired_codex.append_result_record(path, row)
+                with self.assertRaisesRegex(ValueError, "arm result"):
+                    paired_codex.load_results(path)
 
     def test_result_loader_rejects_invalid_arm_rows_fail_closed(self):
         schedule = fake_schedule()
@@ -1359,6 +1480,77 @@ class PairedCodexTests(unittest.TestCase):
         self.assertEqual("arm-result", row["kind"])
         self.assertEqual("interrupted", row["completion_state"])
         self.assertIn("interrupted", row["incomplete_reasons"])
+
+    def test_leaf_receipt_interrupt_keeps_only_auditable_prefix_and_reraises(self):
+        case = paired_codex.load_case_definition(paired_codex.CASE_ROOT / "medium")
+        snapshot = real_case_snapshot(case)
+        config = fake_routing_config()
+        definitions = fake_case_definitions()
+        schedule = paired_codex.build_schedule(
+            41,
+            fake_run_contract(),
+            (fake_case_snapshots()[0], snapshot, fake_case_snapshots()[2]),
+            definitions,
+            config,
+        )
+        entry = next(
+            item for item in schedule.entries
+            if (item.case_id, item.repetition, item.arm) == ("medium", 1, "canopy")
+        )
+        plan = next(
+            item for item in schedule.execution_plans
+            if (item.case_id, item.arm) == ("medium", "canopy")
+        )
+        findings = iter((
+            [{
+                "file": "subject/archive.py", "start_line": 5, "end_line": 7,
+                "category": "security", "severity": "high", "summary": "escape",
+            }],
+            [{
+                "file": "subject/retry.py", "start_line": 1, "end_line": 2,
+                "category": "correctness", "severity": "medium", "summary": "retry",
+            }],
+        ))
+        original_append = runtime_tree.append_proof_receipt
+        writes = []
+
+        def interrupt_second_receipt(*args, **kwargs):
+            writes.append(args[0])
+            if len(writes) == 2:
+                raise KeyboardInterrupt()
+            return original_append(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results.jsonl"
+            paired_codex.append_result_record(
+                results, {"kind": "schedule", **asdict(schedule)}
+            )
+            with patch.object(
+                runtime_tree,
+                "append_proof_receipt",
+                side_effect=interrupt_second_receipt,
+            ), self.assertRaises(KeyboardInterrupt):
+                paired_codex.run_canopy_arm(
+                    case, entry, config, fake_run_contract(), snapshot, plan,
+                    seed=41,
+                    state_root=root,
+                    results_path=results,
+                    execute=lambda _request: completed_result(next(findings)),
+                    capability=fake_capability,
+                )
+            _, records = paired_codex.load_results(results)
+            record = records[0]
+            self.assertEqual(("archive",), tuple(
+                invocation.node_id for invocation in record.invocations
+            ))
+            paired_codex.audit_proof_receipt(
+                root, record.invocations[0].receipt, record.invocations[0].output_hash
+            )
+            missing = root / "receipts" / paired_codex._schedule_slug(entry) / "retry.jsonl"
+            self.assertFalse(missing.exists())
+        self.assertEqual("interrupted", record.completion_state)
+        self.assertIn("interrupted", record.incomplete_reasons)
 
     def test_probe_without_execute_never_calls_provider(self):
         output = io.StringIO()
