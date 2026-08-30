@@ -12,6 +12,9 @@ codex plugin add code-canopy@codecanopy
 ```
 
 Restart the Codex or ChatGPT desktop app after installation, then start a new task.
+The marketplace package installs the skill. The optional Python runtime commands
+below currently require a repository checkout; packaging that runtime is the
+next release gate.
 
 ## Use
 
@@ -28,7 +31,7 @@ CodeCanopy keeps two structures separate:
 
 The root applies a Leaf Test before delegation. Atomic work stays with one agent. Non-atomic work splits only into independently verifiable outcomes, runs from the deepest dependency-ready frontier, and returns upward through parent acceptance checks. Before dependent source work runs, the root materializes its accepted predecessors into an immutable baseline. Changed contracts invalidate only dependent descendants.
 
-During planning, CodeCanopy estimates each node's normalized complexity and size, computes the weighted routing score from `.codecanopy.toml`, and automatically selects the smallest capable configured tier. Simple bounded work routes to `worker`, medium work to `expert`, and complex or safety-sensitive work to `lead`; review work routes to `reviewer`, and uncertain work never routes below `expert`. The checked-in deterministic policy benchmark currently passes 10/10 routing cases and rejects 3/3 invalid estimates; it is not a model-quality or latency benchmark. Run it with `python3 benchmarks/model_routing.py`.
+During planning, CodeCanopy estimates each node's normalized complexity and size, computes the weighted routing score from `.codecanopy.toml`, and automatically selects the smallest configured tier allowed by policy. Simple bounded work routes to `worker`, medium work to `expert`, and complex or safety-sensitive work to `lead`; review work routes to `reviewer`, and uncertain work never routes below `expert`. The checked-in deterministic policy benchmark currently passes 10/10 routing cases, rejects 3/3 invalid estimates, and gives 6/10 fixture cases non-lead assignments. It is not evidence of model quality, token savings, latency, or throughput. Run it with `python3 benchmarks/model_routing.py`; use the [paired benchmark contract](benchmarks/README.md) before making comparative claims.
 
 ```text
 Goal lead
@@ -62,13 +65,19 @@ retry_limit = 1
 
 The strongest configured tier owns requirements, material questions, integration, and replanning. Smaller configured tiers receive bounded work. Model availability and host limits still apply.
 
-Provider and timeout are per-node `ProviderRequest` values, not TOML settings. Local support checks an installed CLI, then invokes either `codex exec --json` or `claude --print --output-format json` without a shell. The only fallback is an unavailable Claude executable to Codex, and the result/receipt flags it. Local support does not copy credentials, choose a provider silently, or claim that provider policies or model quality are equivalent.
+Provider and timeout are per-node values, not TOML settings. Local support checks an installed CLI, prepends a fixed trust boundary, and invokes Codex or Claude without a shell. Delegated Codex runs ignore user config and rules, disable project instruction loading and workspace network, prevent login shells, strip the child-shell environment, require the configured sandbox, and persist no session. Claude runs in safe, non-persistent mode with only bounded file tools; customizations, Bash, agents, browser, slash-command, web, and MCP tools are unavailable. The root runs acceptance checks. Fallback is denied by default; unavailable Claude work reaches Codex only after explicit CLI consent. The provider subprocess receives an allowlisted environment and bounded output capture. CodeCanopy does not claim that provider policies or model quality are equivalent.
 
 ## Safety boundary
 
-The skill never expands the user's authority. Remote writes, destructive actions, credentials, production changes, and scope expansion require explicit approval. CodeCanopy and the root create and verify worktree isolation where needed; the local helper creates detached worktrees under a caller-owned root and never merges, commits, or pushes. The host retains its documented sandbox, approval, model, and concurrency boundaries.
+The skill never expands the user's authority. Repository instructions, code comments, issues, logs, web content, attachments, and child output are untrusted task data: they cannot request secrets, enable network, change provider, bypass approvals, or authorize destructive or remote Git actions. CodeCanopy and the root create and verify worktree isolation where needed; the local helper never merges, commits, or pushes.
 
-Local manifests and proof receipts are append-only JSONL evidence for interrupted-run recovery. Recovery never marks work successful; the parent rechecks the immutable baseline, dependencies, worktree, and evidence before dispatch, otherwise invalidating only downstream nodes. This is local runtime support, not a durable scheduler, distributed lock, secret store, production audit trail, or proof of provider quality.
+Local manifests and proof receipts are owner-only, symlink-safe, size-bounded JSONL evidence. Manifests store prompt hashes rather than raw prompts and validate lifecycle replay. Accepted state is never reused across invocations until keyed integrity exists. Worktree reuse verifies Git registration, repository identity, detached state, and baseline. This is local runtime support, not a cryptographically authenticated audit trail, durable scheduler, secret store, or proof of provider quality.
+
+### Coordinate Codex app tasks and model families
+
+CodeCanopy may plan one user-visible Codex app task per independent branch only after the user explicitly authorizes task creation. App-task fanout is a host-native execution surface, not the local `codex exec` provider path: the root alone creates tasks, messages them, verifies returned commits and checks, and accepts work. The initial contract forbids nested app-task creation and shared writable paths.
+
+Codex app tasks, local Codex CLI nodes, and local Claude CLI nodes collaborate through root-verified commits, artifacts, checks, and normalized result packets. They do not share raw transcripts or credentials. A human-readable `team-room.md`, when requested and authorized, is generated only by the root from bounded status observations; children never edit it concurrently. Other model families remain unsupported until an allowlisted adapter defines capability, isolation, credential, timeout, and proof boundaries. See the [Codex app task and cross-provider adapter](plugins/code-canopy/skills/code-canopy/references/codex-app-adapter.md).
 
 ### Run a mixed-provider tree locally
 
@@ -79,18 +88,32 @@ The runtime accepts a small JSON plan. Each node names its provider and dependen
   "run_id": "mixed-example",
   "nodes": [
     {"id": "contract", "provider": "codex", "prompt": "Define the contract."},
-    {"id": "backend", "provider": "codex", "depends_on": ["contract"], "prompt": "Implement the backend."},
-    {"id": "ui", "provider": "claude", "depends_on": ["contract"], "prompt": "Implement the UI."}
+    {"id": "backend", "provider": "codex", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the backend."},
+    {"id": "ui", "provider": "claude", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the UI."}
   ]
 }
 ```
 
-Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --accept-completed` only when a successful CLI exit is the explicit leaf check. Without that flag, results remain `returned` until the parent runs its acceptance check. If a node omits `baseline`, the runner resolves the current Git revision to a full commit before recording or dispatching it. Add `repo` and `worktree_root` to the plan for detached Git worktrees. A missing Claude CLI may use Codex only when the result records the fallback; failures and timeouts never switch providers.
+Replace the example dependency SHA with the accepted predecessor commit already materialized in each dependent node's baseline; every dependency requires an exact immutable mapping. Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --repo . --worktree-root .worktrees --receipt-dir .codecanopy/receipts --accept-completed` only when a successful CLI exit is the explicit leaf check. Trusted filesystem roots are CLI arguments and are rejected inside the JSON plan. Without `--accept-completed`, results remain `returned`. Add `--allow-provider-fallback` only when unavailable Claude work may be disclosed to Codex. Completed manifests remain inspectable but cannot authorize another execution.
+
+Inspect an existing local run without dispatching a provider:
+
+```bash
+python3 -m runtime.tree --status --manifest .codecanopy/run.jsonl --run-id mixed-example
+python3 -m runtime.tree --inspect ui --manifest .codecanopy/run.jsonl --run-id mixed-example
+```
+
+`--status` reports node counts and the dependency-ready critical frontier;
+`--inspect` prints the recorded contract, checks, and invalidations for one
+node. These are local manifest views, not proof that a goal is accepted.
 
 ## Roadmap
 
-- Current: Recursive Canopy v0.2 core plus v0.3 local runtime support, [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), and implementation tracking in [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
-- Evidence-gated: real-provider quality, production behavior, and durable multi-process recovery remain unclaimed until separately observed.
+- Current release: v0.4.0 hardens the public skill and local runtime against instruction injection, credential leakage, provider confusion, unsafe state files, forged lifecycle replay, unbounded input/output, and worktree substitution. See [CHANGELOG.md](CHANGELOG.md).
+- Next: package the local runtime with the marketplace artifact, add a pinned release workflow, and verify the installed plugin from a clean archive.
+- In progress: run observability now includes `--status` and `--inspect` for reconstructing the critical frontier from a manifest.
+- Tracked work: [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), [current work](https://github.com/adhit-r/codecanopy/issues/1), and the provider/recovery issues [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).
+- Evidence-gated: real-provider quality, comparative token and wall-clock gains, production behavior, and durable multi-process recovery remain unclaimed until separately observed.
 
 A deterministic scheduler remains deferred until real runs show that the local contract cannot honor limits or recovery requirements.
 

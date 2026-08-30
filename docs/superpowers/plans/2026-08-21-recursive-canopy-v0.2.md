@@ -53,7 +53,7 @@ Ship the approved defaults under `[tree]`, `[budget]`, and the four `[models.*]`
 Run:
 
 ```bash
-python3 /Users/adhi/.codex/skills/.system/skill-creator/scripts/quick_validate.py plugins/code-canopy/skills/code-canopy
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/code-canopy/skills/code-canopy
 ```
 
 Expected: exit 0 with a valid skill report.
@@ -119,8 +119,8 @@ Describe recursive planning, `.codecanopy.toml`, honest host boundaries, the Pag
 Run:
 
 ```bash
-python3 /Users/adhi/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/code-canopy
-python3 /Users/adhi/.codex/skills/.system/skill-creator/scripts/quick_validate.py plugins/code-canopy/skills/code-canopy
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/code-canopy
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/code-canopy/skills/code-canopy
 ```
 
 Expected: both commands exit 0.

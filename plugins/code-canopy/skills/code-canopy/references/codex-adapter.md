@@ -1,6 +1,6 @@
 # CodeCanopy Codex adapter
 
-This adapter maps the provider-neutral runtime contract to current Codex preferences. The local runtime invokes Codex headlessly with `codex exec --json` after its capability check and within the recorded timeout. The runtime contract still defines CodeCanopy behavior; Codex and its host environment retain enforcement of their own capabilities and policy.
+This adapter maps the provider-neutral runtime contract to current Codex preferences. The local runtime invokes Codex headlessly with `codex exec --json --sandbox <read-only|workspace-write> --ephemeral` after its capability check and within the recorded timeout. It ignores user config and execution rules, disables project instruction loading and workspace network, uses a never-escalate approval policy, strips the child-shell environment, and disallows login shells. Write access is selected only for an isolated writing worktree. The runtime contract still defines CodeCanopy behavior; Codex and its host environment retain enforcement of their own capabilities and policy.
 
 ## Role preferences
 
@@ -27,4 +27,4 @@ No documented Codex setting enforces CodeCanopy's maximum depth or total-node li
 
 Configuration may tune planning limits and preferred model mappings. It cannot grant Git, network, destructive, credential, production, or publication authority. A child receives no authority beyond its parent, and Codex approval or sandbox enforcement remains independent of the planning contract.
 
-Codex is the explicit recorded fallback only for a Claude node whose CLI executable is unavailable. The receipt identifies both requested and actual provider; no credential is transferred between CLIs.
+Codex is the explicit recorded fallback only for a Claude node whose CLI executable is unavailable and whose caller authorized that exact transition before dispatch. The receipt identifies both requested and actual provider; the subprocess environment allowlist never transfers Claude credentials.

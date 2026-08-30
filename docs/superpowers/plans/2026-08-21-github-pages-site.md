@@ -88,7 +88,7 @@ Then verify `/`, the stylesheet, both public links, keyboard focus, and zero ove
 Run:
 
 ```bash
-node /Users/adhi/.agents/skills/impeccable/scripts/detect.mjs --json docs/index.html docs/styles.css
+node "$HOME/.agents/skills/impeccable/scripts/detect.mjs" --json docs/index.html docs/styles.css
 ```
 
 Expected: no unresolved blocking mechanical finding after one fix batch.

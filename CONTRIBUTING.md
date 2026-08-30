@@ -21,8 +21,9 @@ CodeCanopy prefers the smallest verified contribution that closes one issue.
 Run the checks that cover your change. For plugin contract or metadata changes, run:
 
 ```bash
-python3 /Users/adhi/.codex/skills/.system/skill-creator/scripts/quick_validate.py plugins/code-canopy/skills/code-canopy
-python3 /Users/adhi/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/code-canopy
+python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/code-canopy/skills/code-canopy
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/code-canopy
 python3 -m unittest discover -s tests -v
 python3 benchmarks/model_routing.py
 git diff --check

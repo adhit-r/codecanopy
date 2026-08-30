@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -14,41 +15,70 @@ from runtime import providers
 class ProviderTests(unittest.TestCase):
     def test_capability_uses_which_and_optional_safe_version_probe(self) -> None:
         runner = Mock(return_value=subprocess.CompletedProcess(["codex"], 0, "codex 1.2\n", ""))
-        capability = providers.provider_capability("codex", probe_version=True, which=lambda _: "/bin/codex", runner=runner)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "must-not-reach-version-probe"}):
+            capability = providers.provider_capability("codex", probe_version=True, which=lambda _: "/bin/codex", runner=runner)
         self.assertEqual((capability.available, capability.version), (True, "codex 1.2"))
         self.assertEqual(runner.call_args.kwargs["timeout"], 5)
+        self.assertNotIn("OPENAI_API_KEY", runner.call_args.kwargs["env"])
 
-    def test_claude_fallback_to_codex_is_explicit(self) -> None:
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
-        result = providers.execute_provider(
-            providers.ProviderRequest("do work", preferred_provider="claude"),
-            which=lambda name: "/bin/codex" if name == "codex" else None,
-            runner=runner,
-        )
+    def test_claude_fallback_fails_closed_by_default(self) -> None:
+        with patch.object(providers, "_run_bounded") as runner:
+            result = providers.execute_provider(
+                providers.ProviderRequest("do work", preferred_provider="claude"),
+                which=lambda name: "/bin/codex" if name == "codex" else None,
+            )
+        self.assertEqual((result.status, result.provider, result.fallback_used), ("unavailable", None, False))
+        runner.assert_not_called()
+
+    def test_claude_fallback_to_codex_requires_explicit_opt_in(self) -> None:
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
+            result = providers.execute_provider(
+                providers.ProviderRequest("do work", preferred_provider="claude", allow_fallback=True),
+                which=lambda name: "/bin/codex" if name == "codex" else None,
+            )
         self.assertEqual((result.status, result.provider, result.fallback_used), ("completed", "codex", True))
         self.assertEqual(result.receipt_data["fallback_reason"], "preferred provider executable unavailable")
-        self.assertEqual(runner.call_args.args[0], ("/bin/codex", "exec", "--json", "do work"))
+        command = runner.call_args.args[0]
+        self.assertEqual(command[0:6], ("/bin/codex", "exec", "--json", "--sandbox", "read-only", "--ephemeral"))
+        self.assertEqual(command[-1], providers.SECURITY_PREAMBLE + "do work")
 
     def test_timeout_returns_a_normalized_result(self) -> None:
-        result = providers.execute_provider(
-            providers.ProviderRequest("do work", timeout_seconds=2),
-            which=lambda _: "/bin/codex",
-            runner=Mock(side_effect=subprocess.TimeoutExpired("codex", 2)),
-        )
+        with patch.object(providers, "_run_bounded", side_effect=subprocess.TimeoutExpired("codex", 2)):
+            result = providers.execute_provider(
+                providers.ProviderRequest("do work", timeout_seconds=2),
+                which=lambda _: "/bin/codex",
+            )
         self.assertEqual((result.status, result.provider), ("timed_out", "codex"))
 
     def test_provider_environment_does_not_share_known_credentials(self) -> None:
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0, "done", ""))
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "openai", "ANTHROPIC_API_KEY": "anthropic", "CODEX_API_KEY": "codex"}):
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner, patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "openai",
+                "ANTHROPIC_API_KEY": "anthropic",
+                "CODEX_API_KEY": "codex",
+                "AWS_SECRET_ACCESS_KEY": "aws-secret",
+                "GH_TOKEN": "github-secret",
+                "SSH_AUTH_SOCK": "/tmp/agent.sock",
+                "PATH": ".:/tmp:/usr/bin",
+            },
+        ):
             providers.execute_provider(
                 providers.ProviderRequest("do work", preferred_provider="claude"),
                 which=lambda name: "/bin/claude" if name == "claude" else None,
-                runner=runner,
             )
         environment = runner.call_args.kwargs["env"]
         self.assertNotIn("OPENAI_API_KEY", environment)
         self.assertNotIn("CODEX_API_KEY", environment)
         self.assertEqual("anthropic", environment["ANTHROPIC_API_KEY"])
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", environment)
+        self.assertNotIn("GH_TOKEN", environment)
+        self.assertNotIn("SSH_AUTH_SOCK", environment)
+        self.assertEqual("/usr/bin", environment["PATH"])
 
     def test_receipt_hashes_secrets_without_persisting_them(self) -> None:
         request = providers.ProviderRequest("token=secret")
@@ -81,18 +111,86 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(row["exit_code"], 2)
         self.assertEqual(row["timeout_seconds"], 7)
 
-    def test_command_override_must_start_with_provider_token(self) -> None:
-        runner = Mock()
-        with self.assertRaises(ValueError):
+    def test_codex_write_access_is_explicit_and_sandboxed(self) -> None:
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
             providers.execute_provider(
-                providers.ProviderRequest(
-                    "do work",
-                    command_overrides={"codex": ("unexpected", "--json")},
-                ),
+                providers.ProviderRequest("do work", write_access=True),
                 which=lambda _: "/bin/codex",
-                runner=runner,
+            )
+        command = runner.call_args.args[0]
+        self.assertIn("workspace-write", command)
+        self.assertNotIn("danger-full-access", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+        self.assertIn("project_doc_max_bytes=0", command)
+        self.assertIn('approval_policy="never"', command)
+        self.assertIn("sandbox_workspace_write.network_access=false", command)
+        self.assertIn('shell_environment_policy.inherit="none"', command)
+        self.assertIn("allow_login_shell=false", command)
+
+    def test_claude_uses_plan_or_isolated_edit_permissions(self) -> None:
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
+            for write_access, expected in ((False, "plan"), (True, "acceptEdits")):
+                providers.execute_provider(
+                    providers.ProviderRequest("do work", preferred_provider="claude", write_access=write_access),
+                    which=lambda _: "/bin/claude",
+                )
+                command = runner.call_args.args[0]
+                self.assertIn(expected, command)
+                self.assertIn("--safe-mode", command)
+                self.assertIn("--strict-mcp-config", command)
+                self.assertIn("--no-session-persistence", command)
+                self.assertIn("--no-chrome", command)
+                self.assertIn("--disable-slash-commands", command)
+                denied = command[command.index("--disallowedTools") + 1 : command.index("--tools")]
+                self.assertEqual(("WebFetch", "WebSearch", "mcp__*"), denied)
+                tools = command[command.index("--tools") + 1]
+                self.assertEqual("Read,Edit,Write,Grep,Glob" if write_access else "Read,Grep,Glob", tools)
+                self.assertNotIn("Bash", tools)
+                self.assertEqual("8", command[command.index("--max-turns") + 1])
+
+    def test_request_limits_are_enforced_before_execution(self) -> None:
+        with patch.object(providers, "_run_bounded") as runner, self.assertRaises(ValueError):
+            providers.execute_provider(
+                providers.ProviderRequest("x" * (providers.MAX_PROMPT_CHARS + 1)),
+                which=lambda _: "/bin/codex",
             )
         runner.assert_not_called()
+
+    def test_provider_output_is_bounded(self) -> None:
+        completed = providers._run_bounded(
+            (sys.executable, "-c", "import sys; sys.stdout.write('x' * 2000000)"),
+            cwd=None,
+            env=os.environ.copy(),
+            timeout=5,
+        )
+        self.assertEqual(125, completed.returncode)
+        self.assertLessEqual(len(completed.stdout.encode("utf-8")), providers.MAX_PROVIDER_OUTPUT_BYTES)
+        self.assertIn("output exceeded", completed.stderr)
+
+    def test_provider_streams_are_closed_after_capture(self) -> None:
+        original_popen = subprocess.Popen
+        processes = []
+
+        def capture_process(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(providers.subprocess, "Popen", side_effect=capture_process):
+            providers._run_bounded(
+                (sys.executable, "-c", "print('done')"),
+                cwd=None,
+                env=os.environ.copy(),
+                timeout=5,
+            )
+
+        self.assertTrue(processes[0].stdout.closed)
+        self.assertTrue(processes[0].stderr.closed)
 
     def test_worktree_rejects_path_traversal_before_running_git(self) -> None:
         runner = Mock()
@@ -107,18 +205,93 @@ class ProviderTests(unittest.TestCase):
             target = providers.prepare_isolated_worktree(".", directory, "worker-a", runner=runner)
             self.assertEqual(target.parent, Path(directory).resolve())
         self.assertIn("--detach", runner.call_args.args[0])
+        self.assertEqual(providers.GIT_OPERATION_TIMEOUT_SECONDS, runner.call_args.kwargs["timeout"])
 
-    def test_recovery_can_reuse_a_known_worktree(self) -> None:
-        runner = Mock()
+    def test_recovery_can_reuse_only_the_expected_registered_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            worktrees = root / "worktrees"
+            subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "CodeCanopy Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            (repo / "seed.txt").write_text("seed", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "seed.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "seed"], check=True, capture_output=True)
+            revision = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            target = providers.prepare_isolated_worktree(repo, worktrees, "worker-a", revision=revision)
+            reused = providers.prepare_isolated_worktree(
+                repo, worktrees, "worker-a", revision=revision, reuse_existing=True
+            )
+        self.assertEqual(target.resolve(), reused)
+
+    def test_recovery_rejects_a_forged_git_marker(self) -> None:
+        runner = Mock(side_effect=subprocess.CalledProcessError(128, ["git"]))
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "worker-a"
             target.mkdir()
-            (target / ".git").write_text("gitdir: /tmp/worktree", encoding="utf-8")
-            reused = providers.prepare_isolated_worktree(
-                ".", directory, "worker-a", reuse_existing=True, runner=runner
-            )
-        self.assertEqual(target.resolve(), reused)
-        runner.assert_not_called()
+            (target / ".git").write_text("gitdir: /tmp/forged", encoding="utf-8")
+            with self.assertRaises(subprocess.CalledProcessError):
+                providers.prepare_isolated_worktree(
+                    ".", directory, "worker-a", reuse_existing=True, runner=runner
+                )
+
+    def test_receipt_rejects_a_symlink(self) -> None:
+        request = providers.ProviderRequest("do work")
+        result = providers.ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.write_text("untouched", encoding="utf-8")
+            receipt = root / "receipt.jsonl"
+            receipt.symlink_to(target)
+            with self.assertRaises(ValueError):
+                providers.append_proof_receipt(receipt, request, result)
+            self.assertEqual("untouched", target.read_text(encoding="utf-8"))
+
+    def test_receipt_rejects_a_hard_link(self) -> None:
+        request = providers.ProviderRequest("do work")
+        result = providers.ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.write_text("untouched", encoding="utf-8")
+            receipt = root / "receipt.jsonl"
+            os.link(target, receipt)
+            with self.assertRaises(ValueError):
+                providers.append_proof_receipt(receipt, request, result)
+            self.assertEqual("untouched", target.read_text(encoding="utf-8"))
+
+    def test_receipt_append_rejects_the_event_after_the_limit(self) -> None:
+        request = providers.ProviderRequest("do work")
+        result = providers.ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "receipt.jsonl"
+            providers.append_proof_receipt(receipt, request, result)
+            original = receipt.read_bytes()
+            with patch.object(providers, "MAX_RECEIPT_EVENTS", 1), self.assertRaisesRegex(
+                ValueError, "event limit"
+            ):
+                providers.append_proof_receipt(receipt, request, result)
+            self.assertEqual(original, receipt.read_bytes())
+
+    def test_receipt_append_rejects_an_existing_oversized_file_before_scanning(self) -> None:
+        request = providers.ProviderRequest("do work")
+        result = providers.ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "receipt.jsonl"
+            receipt.write_bytes(b"x" * 9)
+            original = receipt.read_bytes()
+            with patch.object(providers, "MAX_RECEIPT_BYTES", 8), self.assertRaisesRegex(
+                ValueError, "size limit"
+            ):
+                providers.append_proof_receipt(receipt, request, result)
+            self.assertEqual(original, receipt.read_bytes())
 
 
 if __name__ == "__main__":
