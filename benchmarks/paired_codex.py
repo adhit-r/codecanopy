@@ -2575,11 +2575,14 @@ def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
 
 
 def _acceptance_locked(results: Path, state_root: Path, seed: int) -> int:
-    schedule, cases, config = _build_command_schedule(seed)
     if results.exists():
         schedule, _ = load_results(results)
+        if schedule.seed != seed:
+            raise ValueError("resume seed does not match the frozen schedule")
+        _, cases, config = _build_command_schedule(schedule.seed)
         config = _config_from_frozen_schedule(schedule, config)
     else:
+        schedule, cases, config = _build_command_schedule(seed)
         schedule, config = _resolve_command_schedule(schedule, cases, config)
     existing_records = _persist_schedule(results, schedule)
     definitions = {case.case_id: case for case in cases}
@@ -2598,7 +2601,7 @@ def _acceptance_locked(results: Path, state_root: Path, seed: int) -> int:
             schedule.run_contract,
             snapshot,
             plan,
-            seed=seed,
+            seed=schedule.seed,
             state_root=state_root,
             results_path=results,
         )

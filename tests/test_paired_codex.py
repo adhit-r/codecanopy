@@ -1095,6 +1095,53 @@ class PairedCodexTests(unittest.TestCase):
                 self.assertEqual([(schedule.entries[1], schedule.run_contract.model_catalog_snapshot)], calls)
                 self.assertEqual("frozen evidence", evidence.read_text(encoding="utf-8"))
 
+    def test_catalog_backed_acceptance_rejects_different_resume_seed_before_mutation(self):
+        unresolved, cases, config = paired_codex._build_command_schedule(41)
+        schedule, _ = paired_codex._resolve_command_schedule(
+            unresolved, cases, config, resolver=lambda *_args: frozen_codex_catalog()
+        )
+        first = complete_arm_record(schedule)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            evidence = state_root / "manifests" / "000-small-sequential.jsonl"
+            evidence.parent.mkdir()
+            evidence.write_text("frozen evidence", encoding="utf-8")
+            results = root / "results.jsonl"
+            paired_codex.append_result_record(
+                results, {"kind": "schedule", **asdict(schedule)}
+            )
+            paired_codex.append_result_record(
+                results, {"kind": "arm-result", **asdict(first)}
+            )
+            original_ledger = results.read_bytes()
+
+            with (
+                patch.object(
+                    paired_codex,
+                    "resolve_model_catalog",
+                    side_effect=AssertionError("must not rediscover"),
+                ),
+                patch.object(
+                    paired_codex,
+                    "run_sequential_arm",
+                    side_effect=AssertionError("must not execute provider"),
+                ),
+                patch.object(
+                    paired_codex,
+                    "run_canopy_arm",
+                    side_effect=AssertionError("must not execute provider"),
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                with self.assertRaisesRegex(ValueError, "seed.*frozen schedule"):
+                    paired_codex._acceptance_command(results, state_root, 42)
+
+            self.assertEqual(original_ledger, results.read_bytes())
+            self.assertEqual("frozen evidence", evidence.read_text(encoding="utf-8"))
+            self.assertEqual((schedule, (first,)), paired_codex.load_results(results))
+
     def test_acceptance_does_not_double_append_runner_interrupt_evidence(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)
