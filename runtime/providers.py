@@ -516,12 +516,16 @@ def _run_bounded(
     cwd: str | None,
     env: Mapping[str, str],
     timeout: float,
+    input_data: bytes | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Capture provider output without allowing it to exhaust process memory."""
+    if input_data is not None and len(input_data) > 64 * 1024:
+        raise ValueError("provider input exceeds 65536 bytes")
     process = subprocess.Popen(
         command,
         cwd=cwd,
         env=env,
+        stdin=subprocess.PIPE if input_data is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
@@ -530,6 +534,16 @@ def _run_bounded(
     output = bytearray()
     error = bytearray()
     try:
+        if input_data is not None:
+            if process.stdin is None:  # pragma: no cover - Popen contract.
+                raise OSError("provider stdin is unavailable")
+            try:
+                process.stdin.write(input_data)
+                process.stdin.flush()
+            except BrokenPipeError:
+                pass
+            finally:
+                process.stdin.close()
         for stream, target in ((process.stdout, output), (process.stderr, error)):
             if stream is not None:
                 os.set_blocking(stream.fileno(), False)
@@ -572,7 +586,7 @@ def _run_bounded(
         )
     finally:
         streams.close()
-        for stream in (process.stdout, process.stderr):
+        for stream in (process.stdin, process.stdout, process.stderr):
             if stream is not None and not stream.closed:
                 stream.close()
 
