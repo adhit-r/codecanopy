@@ -155,6 +155,7 @@ class MixedTreeTests(unittest.TestCase):
                         "provider": "codex",
                         "model_tier": "lead",
                         "depends_on": ["missing"],
+                        "dependency_commits": {"missing": "0" * 40},
                     }
                 ],
             ),
@@ -174,8 +175,30 @@ class MixedTreeTests(unittest.TestCase):
                         "provider": "codex",
                         "model_tier": "worker",
                         "depends_on": [] if index == 0 else [f"node-{index - 1}"],
+                        "dependency_commits": {} if index == 0 else {f"node-{index - 1}": "0" * 40},
                     }
                     for index in range(5)
+                ],
+            ),
+            (
+                "cycle",
+                [
+                    {
+                        "id": "one",
+                        "prompt": "work",
+                        "provider": "codex",
+                        "model_tier": "worker",
+                        "depends_on": ["two"],
+                        "dependency_commits": {"two": "0" * 40},
+                    },
+                    {
+                        "id": "two",
+                        "prompt": "work",
+                        "provider": "codex",
+                        "model_tier": "worker",
+                        "depends_on": ["one"],
+                        "dependency_commits": {"one": "0" * 40},
+                    },
                 ],
             ),
         )

@@ -173,6 +173,13 @@ class ProviderTests(unittest.TestCase):
             ),
             providers.ProviderRequest(
                 "review",
+                model="codex-worker",
+                reasoning_effort="high",
+                model_catalog_hash=catalog_hash,
+                model_catalog_snapshot=snapshot,
+            ),
+            providers.ProviderRequest(
+                "review",
                 model_catalog_hash=catalog_hash,
                 model_catalog_snapshot=snapshot,
             ),
