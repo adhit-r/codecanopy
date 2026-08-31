@@ -130,8 +130,7 @@ class MixedTreeTests(unittest.TestCase):
             ("mutable pair", "codex", [None, None], "exact 2-tuple"),
             ("invalid model", "codex", ("../../escape", None), "model"),
             ("invalid effort", "codex", (None, "fast"), "reasoning_effort"),
-            ("Claude model", "claude", ("claude-sonnet", None), "Claude"),
-            ("Claude effort", "claude", (None, "high"), "Claude"),
+            ("Claude effort", "claude", (None, "ultra"), "Claude"),
         )
         for label, provider, settings, message in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
@@ -179,6 +178,37 @@ class MixedTreeTests(unittest.TestCase):
                     execution_settings=lambda _node: ("gpt-5.6-luna", "medium"),
                     execution_policy_hash="b" * 64,
                     execute=lambda _request: self.fail("changed policy must not execute"),
+                )
+
+    def test_resume_rejects_changed_model_catalog(self):
+        calls = []
+
+        def execute(request):
+            calls.append(request.model_catalog_hash)
+            return ProviderResult("completed", "codex", "codex", False, 0, "ok", None, {})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "run.jsonl"
+            run_tree(
+                [TreeNode("one", "first")],
+                manifest_path=manifest,
+                run_id="catalog",
+                model_catalog_hash="a" * 64,
+                execute=execute,
+            )
+            snapshot = ManifestStore(manifest).snapshot("catalog")
+            receipt = json.loads((root / "receipts" / "one.jsonl").read_text(encoding="utf-8"))
+            self.assertEqual("a" * 64, snapshot["details"]["model_catalog_hash"])
+            self.assertEqual(["a" * 64], calls)
+            self.assertEqual("a" * 64, receipt["model_catalog_hash"])
+            with self.assertRaises(ManifestError):
+                run_tree(
+                    [TreeNode("one", "first")],
+                    manifest_path=manifest,
+                    run_id="catalog",
+                    model_catalog_hash="b" * 64,
+                    execute=lambda _request: self.fail("changed catalog must not execute"),
                 )
 
     def test_changed_model_rejects_recovery_before_execution(self):

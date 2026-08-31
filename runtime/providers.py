@@ -83,6 +83,8 @@ MAX_RECEIPT_EVENT_BYTES = 64 * 1024
 GIT_OPERATION_TIMEOUT_SECONDS = 30
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
+_MODEL_CATALOG_HASH = re.compile(r"^[0-9a-f]{64}$")
+_CLAUDE_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _SAFE_ENVIRONMENT = frozenset(
     {
         "PATH",
@@ -122,6 +124,7 @@ class ProviderRequest:
     write_access: bool = False
     model: str | None = None
     reasoning_effort: str | None = None
+    model_catalog_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,7 @@ class ProviderResult:
     output: str
     error: str | None
     receipt_data: Mapping[str, object]
+    actual_model: str | None = None
 
 
 def provider_capability(
@@ -273,6 +277,8 @@ def append_proof_receipt(
         "timeout_seconds": request.timeout_seconds,
         "requested_model": request.model,
         "requested_reasoning_effort": request.reasoning_effort,
+        "model_catalog_hash": request.model_catalog_hash,
+        "actual_model": result.actual_model,
     }
     receipt.update(
         prompt_hash=_hash(request.prompt),
@@ -361,10 +367,22 @@ def _result(
         "timeout_seconds": request.timeout_seconds,
         "requested_model": request.model,
         "requested_reasoning_effort": request.reasoning_effort,
+        "model_catalog_hash": request.model_catalog_hash,
+        "actual_model": _actual_model(provider, output),
         "prompt_hash": _hash(request.prompt),
         "output_hash": _hash(output),
     }
-    return ProviderResult(status, provider, request.preferred_provider, fallback_used, exit_code, output, error, receipt_data)
+    return ProviderResult(
+        status,
+        provider,
+        request.preferred_provider,
+        fallback_used,
+        exit_code,
+        output,
+        error,
+        receipt_data,
+        receipt_data["actual_model"],
+    )
 
 
 def _hash(value: str) -> str:
@@ -389,8 +407,8 @@ def validate_provider_settings(
         not isinstance(reasoning_effort, str) or reasoning_effort not in REASONING_EFFORTS
     ):
         raise ValueError(f"reasoning_effort must be one of {sorted(REASONING_EFFORTS)}")
-    if provider == "claude" and (model is not None or reasoning_effort is not None):
-        raise ValueError("Claude requests cannot select model or reasoning effort")
+    if provider == "claude" and reasoning_effort is not None and reasoning_effort not in _CLAUDE_REASONING_EFFORTS:
+        raise ValueError(f"Claude reasoning_effort must be one of {sorted(_CLAUDE_REASONING_EFFORTS)}")
 
 
 def _validate_request(request: ProviderRequest) -> None:
@@ -399,6 +417,10 @@ def _validate_request(request: ProviderRequest) -> None:
     if not 0 < request.timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 0 and {MAX_TIMEOUT_SECONDS}")
     validate_provider_settings(request.preferred_provider, request.model, request.reasoning_effort)
+    if request.model_catalog_hash is not None and (
+        not isinstance(request.model_catalog_hash, str) or not _MODEL_CATALOG_HASH.fullmatch(request.model_catalog_hash)
+    ):
+        raise ValueError("model_catalog_hash must be a lowercase SHA-256 digest")
     cwd = Path(request.cwd or Path.cwd())
     if not cwd.is_dir():
         raise ValueError(f"provider working directory does not exist: {cwd}")
@@ -425,11 +447,28 @@ def _provider_command(
         command[command.index("read-only" if provider == "codex" else "plan")] = mode
         if provider == "claude":
             command[command.index("Read,Grep,Glob")] = "Read,Edit,Write,Grep,Glob"
-    if provider == "codex" and model is not None:
+    if model is not None:
         command.extend(("--model", model))
     if provider == "codex" and reasoning_effort is not None:
         command.extend(("--config", f'model_reasoning_effort="{reasoning_effort}"'))
+    if provider == "claude" and reasoning_effort is not None:
+        command.extend(("--effort", reasoning_effort))
     return tuple(command)
+
+
+def _actual_model(provider: ProviderName | None, output: str) -> str | None:
+    """Read Claude's sole reported model key without trusting response prose."""
+    if provider != "claude":
+        return None
+    try:
+        result = json.loads(output)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    model_usage = result.get("modelUsage") if isinstance(result, dict) else None
+    if not isinstance(model_usage, Mapping) or len(model_usage) != 1:
+        return None
+    model = next(iter(model_usage))
+    return model if isinstance(model, str) and MODEL_ID.fullmatch(model) else None
 
 
 def _safe_path(value: str) -> str:

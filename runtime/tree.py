@@ -121,12 +121,15 @@ def run_tree(
     allow_provider_fallback: bool = False,
     execution_settings: ExecutionSettings | None = None,
     execution_policy_hash: str | None = None,
+    model_catalog_hash: str | None = None,
 ) -> dict[str, object]:
     """Run ready nodes in dependency order and leave resume evidence in JSONL."""
     ordered = _topological(tuple(nodes))
     _validate_run_id(run_id)
     if execution_policy_hash is not None and not _POLICY_HASH.fullmatch(execution_policy_hash):
         raise ValueError("execution_policy_hash must be a lowercase SHA-256 digest")
+    if model_catalog_hash is not None and not _POLICY_HASH.fullmatch(model_catalog_hash):
+        raise ValueError("model_catalog_hash must be a lowercase SHA-256 digest")
     settings_by_node: dict[str, tuple[str | None, str | None]] = {}
     for node in ordered:
         settings = execution_settings(node) if execution_settings is not None else (None, None)
@@ -141,8 +144,16 @@ def run_tree(
     try:
         snapshot = store.snapshot(run_id)
     except ManifestError:
-        store.create_run(run_id, state="planned", repo=str(repo) if repo else None)
+        store.create_run(
+            run_id,
+            state="planned",
+            repo=str(repo) if repo else None,
+            model_catalog_hash=model_catalog_hash,
+        )
         snapshot = store.snapshot(run_id)
+    else:
+        if snapshot["details"].get("model_catalog_hash") != model_catalog_hash:
+            raise ManifestError("saved model catalog does not match the requested catalog")
     if any(node["state"] == "accepted" for node in snapshot["nodes"].values()):
         raise ManifestError("accepted manifest state cannot be resumed; start a new run after reviewing evidence")
 
@@ -218,6 +229,7 @@ def run_tree(
             write_access=worktree_root is not None,
             model=settings_by_node[node.node_id][0],
             reasoning_effort=settings_by_node[node.node_id][1],
+            model_catalog_hash=model_catalog_hash,
         )
         result = execute(request)
         receipt_path = receipts / f"{node.node_id}.jsonl"

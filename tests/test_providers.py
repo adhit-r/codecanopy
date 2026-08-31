@@ -61,17 +61,61 @@ class ProviderTests(unittest.TestCase):
         self.assertIn('model_reasoning_effort="medium"', command)
         self.assertEqual(providers.SECURITY_PREAMBLE + "review", command[-1])
 
-    def test_invalid_or_claude_model_settings_fail_before_execution(self) -> None:
+    def test_invalid_or_unsupported_model_settings_fail_before_execution(self) -> None:
         requests = (
             providers.ProviderRequest("review", model="../../escape"),
             providers.ProviderRequest("review", reasoning_effort="fast"),
-            providers.ProviderRequest("review", preferred_provider="claude", model="claude"),
-            providers.ProviderRequest("review", preferred_provider="claude", reasoning_effort="high"),
+            providers.ProviderRequest("review", preferred_provider="claude", reasoning_effort="ultra"),
         )
         for request in requests:
             with self.subTest(request=request), patch.object(providers, "_run_bounded") as runner:
                 with self.assertRaises(ValueError):
                     providers.execute_provider(request, which=lambda _: "/bin/provider")
+                runner.assert_not_called()
+
+    def test_claude_command_includes_selected_model_and_effort(self) -> None:
+        request = providers.ProviderRequest(
+            "review",
+            preferred_provider="claude",
+            model="sonnet",
+            reasoning_effort="high",
+            model_catalog_hash="a" * 64,
+        )
+        completed = subprocess.CompletedProcess([], 0, '{"modelUsage":{"claude-sonnet-current":{}}}', "")
+        with patch.object(providers, "_run_bounded", return_value=completed) as runner:
+            result = providers.execute_provider(request, which=lambda _: "/bin/claude")
+        command = runner.call_args.args[0]
+        self.assertEqual(("--model", "sonnet", "--effort", "high"), command[-5:-1])
+        self.assertEqual(providers.SECURITY_PREAMBLE + "review", command[-1])
+        self.assertEqual("claude-sonnet-current", result.actual_model)
+        with tempfile.TemporaryDirectory() as directory:
+            receipt_path = Path(directory) / "receipt.jsonl"
+            providers.append_proof_receipt(receipt_path, request, result)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual("claude-sonnet-current", receipt["actual_model"])
+        self.assertEqual("a" * 64, receipt["model_catalog_hash"])
+
+    def test_claude_actual_model_requires_one_valid_model_usage_key(self) -> None:
+        request = providers.ProviderRequest("review", preferred_provider="claude")
+        for output in ("not JSON", '{"modelUsage":{"one":{},"two":{}}}', '{"modelUsage":{"../escape":{}}}'):
+            with self.subTest(output=output):
+                result = providers._result(
+                    status="completed",
+                    provider="claude",
+                    request=request,
+                    fallback_used=False,
+                    output=output,
+                )
+                self.assertIsNone(result.actual_model)
+
+    def test_invalid_model_catalog_hash_fails_before_execution(self) -> None:
+        for catalog_hash in ("A" * 64, "a" * 63, "g" * 64):
+            with self.subTest(catalog_hash=catalog_hash), patch.object(providers, "_run_bounded") as runner:
+                with self.assertRaisesRegex(ValueError, "lowercase SHA-256 digest"):
+                    providers.execute_provider(
+                        providers.ProviderRequest("review", model_catalog_hash=catalog_hash),
+                        which=lambda _: "/bin/codex",
+                    )
                 runner.assert_not_called()
 
     def test_timeout_returns_a_normalized_result(self) -> None:
