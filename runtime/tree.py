@@ -505,6 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.allow_provider_fallback:
         parser.error("--allow-provider-fallback is not supported for catalog-backed CLI runs")
     run_id, nodes = _load_plan(args.plan)
+    nodes = _topological(tuple(nodes))
     store = ManifestStore(args.manifest)
     try:
         store.snapshot(run_id)

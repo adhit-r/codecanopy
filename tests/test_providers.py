@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import subprocess
@@ -144,6 +145,54 @@ class ProviderTests(unittest.TestCase):
                         which=lambda _: "/bin/codex",
                     )
                 runner.assert_not_called()
+
+    def test_catalog_snapshot_rejects_unbound_dispatch_settings_before_execution(self) -> None:
+        roles = {
+            "lead": {"model": "codex-lead", "reasoning_effort": "high"},
+            "expert": {"model": "codex-expert", "reasoning_effort": "high"},
+            "reviewer": {"model": "codex-expert", "reasoning_effort": "high"},
+            "worker": {"model": "codex-worker", "reasoning_effort": "medium"},
+        }
+        payload = {
+            "provider": "codex",
+            "source": "test_catalog",
+            "source_version": "1",
+            "roles": roles,
+        }
+        catalog_hash = sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        snapshot = {**payload, "catalog_hash": catalog_hash}
+        requests = (
+            providers.ProviderRequest(
+                "review",
+                model="codex-unlisted",
+                reasoning_effort="high",
+                model_catalog_hash=catalog_hash,
+                model_catalog_snapshot=snapshot,
+            ),
+            providers.ProviderRequest(
+                "review",
+                model_catalog_hash=catalog_hash,
+                model_catalog_snapshot=snapshot,
+            ),
+        )
+        for request in requests:
+            with self.subTest(request=request), patch.object(providers, "_run_bounded") as runner:
+                with self.assertRaisesRegex(ValueError, "must match the model catalog snapshot"):
+                    providers.execute_provider(request, which=lambda _: "/bin/codex")
+                runner.assert_not_called()
+        exact = providers.ProviderRequest(
+            "review",
+            model="codex-lead",
+            reasoning_effort="high",
+            model_catalog_hash=catalog_hash,
+            model_catalog_snapshot=snapshot,
+        )
+        completed = subprocess.CompletedProcess([], 0, '{"type":"turn.completed","usage":{}}\n', "")
+        with patch.object(providers, "_run_bounded", return_value=completed) as runner:
+            providers.execute_provider(exact, which=lambda _: "/bin/codex")
+        runner.assert_called_once()
 
     def test_timeout_returns_a_normalized_result(self) -> None:
         with patch.object(providers, "_run_bounded", side_effect=subprocess.TimeoutExpired("codex", 2)):

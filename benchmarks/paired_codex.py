@@ -2574,9 +2574,31 @@ def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+def _load_acceptance_results(
+    results: Path,
+) -> tuple[BenchmarkSchedule, tuple[ArmRecord, ...]] | None:
+    """Safely create or load the private ledger; an empty file is recoverable."""
+    with open_private(results, append=True, repair_permissions=False) as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+        try:
+            size = os.fstat(handle.fileno()).st_size
+            if size > MAX_RESULT_BYTES:
+                raise ValueError("benchmark result size limit exceeded")
+            if size == 0:
+                return None
+            handle.seek(0)
+            payload = handle.read(MAX_RESULT_BYTES + 1)
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    return _results_from_payload(payload)
+
+
 def _acceptance_locked(results: Path, state_root: Path, seed: int) -> int:
-    if results.exists():
-        schedule, _ = load_results(results)
+    loaded = _load_acceptance_results(results)
+    if loaded is not None:
+        schedule, _ = loaded
         if schedule.seed != seed:
             raise ValueError("resume seed does not match the frozen schedule")
         _, cases, config = _build_command_schedule(schedule.seed)

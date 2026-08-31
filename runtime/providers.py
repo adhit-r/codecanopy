@@ -436,6 +436,12 @@ def _validate_request(request: ProviderRequest) -> None:
         snapshot = validate_model_catalog_snapshot(request.model_catalog_snapshot, request.preferred_provider)
         if request.model_catalog_hash != snapshot["catalog_hash"]:
             raise ValueError("model_catalog_hash must match the model catalog snapshot")
+        settings = {
+            (role["model"], role["reasoning_effort"])
+            for role in snapshot["roles"].values()
+        }
+        if (request.model, request.reasoning_effort) not in settings:
+            raise ValueError("requested model and reasoning_effort must match the model catalog snapshot")
     cwd = Path(request.cwd or Path.cwd())
     if not cwd.is_dir():
         raise ValueError(f"provider working directory does not exist: {cwd}")

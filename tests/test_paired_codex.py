@@ -990,6 +990,43 @@ class PairedCodexTests(unittest.TestCase):
                 loaded_records,
             )
 
+    def test_acceptance_initializes_existing_empty_private_ledger_without_path_probes(self):
+        schedule, records, _receipt_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        by_entry = {record.entry: record for record in records}
+        calls = []
+
+        def fake_runner(_case, entry, _config, _contract, _snapshot, _plan, **_kwargs):
+            calls.append(entry)
+            return by_entry[entry]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "empty-results.jsonl"
+            results.touch(mode=0o600)
+            state_root = root / "state"
+
+            with (
+                patch.object(Path, "exists", side_effect=AssertionError("unsafe path probe")),
+                patch.object(Path, "stat", side_effect=AssertionError("unsafe path probe")),
+                patch.object(
+                    paired_codex,
+                    "_build_command_schedule",
+                    return_value=(schedule, fake_case_definitions(), fake_routing_config()),
+                ),
+                patch.object(paired_codex, "run_sequential_arm", side_effect=fake_runner),
+                patch.object(paired_codex, "run_canopy_arm", side_effect=fake_runner),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(0, paired_codex._acceptance_command(results, state_root, 41))
+
+            self.assertEqual(list(schedule.entries[:2]), calls)
+            self.assertEqual(
+                (schedule, tuple(by_entry[entry] for entry in schedule.entries[:2])),
+                paired_codex.load_results(results),
+            )
+            self.assertEqual(0o600, results.stat().st_mode & 0o777)
+
     def test_acceptance_resumes_schedule_only_ledger_with_absent_state_root(self):
         schedule, records, _receipt_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)

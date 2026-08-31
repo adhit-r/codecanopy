@@ -137,6 +137,66 @@ class MixedTreeTests(unittest.TestCase):
                 self.assertEqual([], executions)
                 self.assertFalse(manifest.exists())
 
+    def test_cli_rejects_invalid_graphs_before_catalog_discovery(self):
+        invalid_nodes = (
+            (
+                "duplicate",
+                [
+                    {"id": "same", "prompt": "one", "provider": "codex", "model_tier": "lead"},
+                    {"id": "same", "prompt": "two", "provider": "codex", "model_tier": "worker"},
+                ],
+            ),
+            (
+                "unknown-dependency",
+                [
+                    {
+                        "id": "node",
+                        "prompt": "work",
+                        "provider": "codex",
+                        "model_tier": "lead",
+                        "depends_on": ["missing"],
+                    }
+                ],
+            ),
+            (
+                "too-many-nodes",
+                [
+                    {"id": f"node-{index}", "prompt": "work", "provider": "codex", "model_tier": "worker"}
+                    for index in range(MAX_NODES + 1)
+                ],
+            ),
+            (
+                "too-deep",
+                [
+                    {
+                        "id": f"node-{index}",
+                        "prompt": "work",
+                        "provider": "codex",
+                        "model_tier": "worker",
+                        "depends_on": [] if index == 0 else [f"node-{index - 1}"],
+                    }
+                    for index in range(5)
+                ],
+            ),
+        )
+        for name, nodes in invalid_nodes:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                plan = root / "plan.json"
+                manifest = root / "run.jsonl"
+                plan.write_text(json.dumps({"run_id": name, "nodes": nodes}), encoding="utf-8")
+                discoveries = []
+
+                def resolve(provider, _settings):
+                    discoveries.append(provider)
+                    return CODEX_CATALOG
+
+                with patch("runtime.tree.resolve_model_catalog", side_effect=resolve):
+                    with self.assertRaises(ValueError):
+                        main([str(plan), "--manifest", str(manifest)])
+                self.assertEqual([], discoveries)
+                self.assertFalse(manifest.exists())
+
     def test_frozen_catalog_maps_every_explicit_tier_for_each_provider(self):
         requests = []
 
