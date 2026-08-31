@@ -3,6 +3,9 @@ from pathlib import Path
 import unittest
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class _BenchmarkMetricsParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -59,7 +62,7 @@ class _BenchmarkMetricsParser(HTMLParser):
 class PagesTests(unittest.TestCase):
     def test_comparative_metrics_remain_explicitly_unmeasured(self) -> None:
         parser = _BenchmarkMetricsParser()
-        parser.feed(Path("docs/index.html").read_text(encoding="utf-8"))
+        parser.feed((ROOT / "docs/index.html").read_text(encoding="utf-8"))
 
         self.assertEqual(
             {
