@@ -2543,10 +2543,9 @@ def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecor
                 existing, records = _results_from_payload(
                     handle.read(MAX_RESULT_BYTES + 1)
                 )
-                if existing != schedule or records:
-                    raise ValueError(
-                        "benchmark results already contain a different or started run"
-                    )
+                if existing != schedule:
+                    raise ValueError("benchmark results already contain a different run")
+                _validate_record_prefix(schedule, records)
                 return records
             handle.write(serialized)
             handle.flush()
@@ -2557,17 +2556,34 @@ def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecor
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _validate_record_prefix(schedule: BenchmarkSchedule, records: Sequence[ArmRecord]) -> None:
+    if len(records) > len(schedule.entries) or tuple(record.entry for record in records) != schedule.entries[:len(records)]:
+        raise ValueError("benchmark results must contain a unique schedule prefix")
+
+
 def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
     state_root = ensure_private_directory(state_root)
+    lock_path = results.with_name(results.name + ".resume.lock")
+    with open_private(lock_path, append=True, repair_permissions=False) as lock:
+        if fcntl is not None:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            return _acceptance_locked(results, state_root, seed)
+        finally:
+            if fcntl is not None:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _acceptance_locked(results: Path, state_root: Path, seed: int) -> int:
     schedule, cases, config = _build_command_schedule(seed)
     if results.exists():
         schedule, _ = load_results(results)
         config = _config_from_frozen_schedule(schedule, config)
     else:
         schedule, config = _resolve_command_schedule(schedule, cases, config)
-    _persist_schedule(results, schedule)
+    existing_records = _persist_schedule(results, schedule)
     definitions = {case.case_id: case for case in cases}
-    for entry in schedule.entries[:2]:
+    for entry in schedule.entries[len(existing_records):2]:
         case = definitions[entry.case_id]
         snapshot = next(item for item in schedule.cases if item.case_id == entry.case_id)
         plan = next(

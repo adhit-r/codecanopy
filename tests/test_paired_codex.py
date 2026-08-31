@@ -866,6 +866,7 @@ class PairedCodexTests(unittest.TestCase):
             ("matching", schedule, ()),
             ("mismatch", fake_schedule(42), ()),
             ("started", schedule, (complete_arm_record(schedule),)),
+            ("nonprefix", schedule, (complete_canopy_record(schedule),)),
         )
         for name, persisted_schedule, records in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
@@ -878,12 +879,13 @@ class PairedCodexTests(unittest.TestCase):
                         ledger, {"kind": "arm-result", **asdict(record)}
                     )
                 original = ledger.read_bytes()
-                if name == "matching":
-                    self.assertEqual((), paired_codex._persist_schedule(ledger, schedule))
+                if name in {"matching", "started"}:
+                    self.assertEqual(records, paired_codex._persist_schedule(ledger, schedule))
+                elif name == "nonprefix":
+                    with self.assertRaisesRegex(ValueError, "unique schedule prefix"):
+                        paired_codex._persist_schedule(ledger, schedule)
                 else:
-                    with self.assertRaisesRegex(
-                        ValueError, "different or started run"
-                    ):
+                    with self.assertRaisesRegex(ValueError, "different run"):
                         paired_codex._persist_schedule(ledger, schedule)
                 self.assertEqual(original, ledger.read_bytes())
 
@@ -1043,6 +1045,55 @@ class PairedCodexTests(unittest.TestCase):
                 loaded_records,
             )
             execute.assert_not_called()
+
+    def test_catalog_backed_acceptance_resumes_terminal_prefix_without_rediscovery(self):
+        unresolved, cases, config = paired_codex._build_command_schedule(41)
+        schedule, _ = paired_codex._resolve_command_schedule(
+            unresolved, cases, config, resolver=lambda *_args: frozen_codex_catalog()
+        )
+        complete = complete_arm_record(schedule)
+        interrupted = replace(
+            complete,
+            invocations=(),
+            score=None,
+            executed_nodes=0,
+            failed_nodes=0,
+            pruned_nodes=complete.planned_nodes,
+            completion_state="interrupted",
+            incomplete_reasons=("interrupted",),
+        )
+        second = complete_canopy_record(schedule)
+        for first in (complete, interrupted):
+            with self.subTest(completion_state=first.completion_state), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state_root = root / "state"
+                state_root.mkdir(mode=0o700)
+                evidence = state_root / "manifests" / "000-small-sequential.jsonl"
+                evidence.parent.mkdir()
+                evidence.write_text("frozen evidence", encoding="utf-8")
+                results = root / "results.jsonl"
+                paired_codex.append_result_record(results, {"kind": "schedule", **asdict(schedule)})
+                paired_codex.append_result_record(results, {"kind": "arm-result", **asdict(first)})
+                calls = []
+
+                def runner(_case, entry, _config, contract, _snapshot, _plan, **_kwargs):
+                    calls.append((entry, contract.model_catalog_snapshot))
+                    return second
+
+                with (
+                    patch.object(paired_codex, "_build_command_schedule", return_value=(unresolved, cases, config)),
+                    patch.object(paired_codex, "resolve_model_catalog", side_effect=AssertionError("must not rediscover")),
+                    patch.object(paired_codex, "run_sequential_arm", side_effect=runner),
+                    patch.object(paired_codex, "run_canopy_arm", side_effect=runner),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(0, paired_codex._acceptance_command(results, state_root, 41))
+
+                loaded_schedule, loaded_records = paired_codex.load_results(results)
+                self.assertEqual(schedule, loaded_schedule)
+                self.assertEqual((first, second), loaded_records)
+                self.assertEqual([(schedule.entries[1], schedule.run_contract.model_catalog_snapshot)], calls)
+                self.assertEqual("frozen evidence", evidence.read_text(encoding="utf-8"))
 
     def test_acceptance_does_not_double_append_runner_interrupt_evidence(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
