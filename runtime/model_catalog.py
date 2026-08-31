@@ -21,6 +21,7 @@ from .providers import (
     ProviderName,
     _provider_environment,
     _run_bounded,
+    _unique_json_object,
 )
 
 
@@ -167,8 +168,8 @@ def _json_rpc_responses(output: object) -> dict[int, dict[str, object]]:
     responses: dict[int, dict[str, object]] = {}
     for line in output.splitlines():
         try:
-            message = json.loads(line)
-        except json.JSONDecodeError as error:
+            message = json.loads(line, object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as error:
             raise ModelCatalogError("Codex JSON-RPC output is malformed") from error
         if not isinstance(message, dict):
             raise ModelCatalogError("Codex JSON-RPC output is malformed")
@@ -303,10 +304,8 @@ def _coerce_role_settings(value: object) -> dict[str, RoleModel]:
 
 
 def _validate_discovery_config(value: object) -> None:
-    if value is None:
-        return
     expected = {"mode": "automatic", "release_channel": "ga", "refresh": "run_start", "on_failure": "fail"}
-    if not isinstance(value, Mapping) or any(value.get(key) != expected[key] for key in expected):
+    if not isinstance(value, Mapping) or set(value) != set(expected) or any(value.get(key) != expected[key] for key in expected):
         raise ModelCatalogError("invalid model_discovery config")
 
 

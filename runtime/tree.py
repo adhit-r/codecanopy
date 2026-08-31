@@ -160,6 +160,8 @@ def run_tree(
     try:
         snapshot = store.snapshot(run_id)
     except UnknownRunError:
+        if require_provider_catalogs and supplied_catalogs is None:
+            raise ManifestError("provider catalog snapshots are required before manifest creation")
         store.create_run(
             run_id,
             state="planned",
@@ -485,7 +487,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     action.add_argument("--status", action="store_true", help="show run state and dependency-ready frontier")
     action.add_argument("--inspect", metavar="NODE_ID", help="show one recorded node contract and evidence")
     parser.add_argument("--accept-completed", action="store_true", help="use successful CLI exit as this run's explicit leaf check")
-    parser.add_argument("--allow-provider-fallback", action="store_true", help="allow unavailable Claude nodes to run with Codex")
+    parser.add_argument("--allow-provider-fallback", action="store_true", help="legacy direct API only; catalog-backed CLI runs fail closed")
     args = parser.parse_args(argv)
     if args.status or args.inspect:
         if args.plan is not None or not args.run_id:
@@ -496,6 +498,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.plan is None:
         parser.error("a plan is required unless --status or --inspect is used")
+    if args.allow_provider_fallback:
+        parser.error("--allow-provider-fallback is not supported for catalog-backed CLI runs")
     run_id, nodes = _load_plan(args.plan)
     store = ManifestStore(args.manifest)
     try:

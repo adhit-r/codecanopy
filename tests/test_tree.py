@@ -4,7 +4,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
@@ -63,6 +63,33 @@ CLAUDE_CATALOG = catalog(
 
 
 class MixedTreeTests(unittest.TestCase):
+    def test_required_catalogs_fail_before_creating_a_new_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "run.jsonl"
+            with self.assertRaisesRegex(ManifestError, "before manifest creation"):
+                run_tree(
+                    [TreeNode("node", "work", model_tier="lead")],
+                    manifest_path=manifest,
+                    run_id="catalog-required",
+                    require_provider_catalogs=True,
+                )
+            self.assertFalse(manifest.exists())
+
+    def test_catalog_backed_cli_rejects_provider_fallback_before_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = root / "plan.json"
+            manifest = root / "run.jsonl"
+            plan.write_text(json.dumps({"run_id": "fallback", "nodes": [{"id": "node", "prompt": "work", "provider": "claude", "model_tier": "lead"}]}), encoding="utf-8")
+            with (
+                patch("runtime.tree.load_role_settings", side_effect=AssertionError("must not load config")),
+                patch("runtime.tree.resolve_model_catalog", side_effect=AssertionError("must not discover")),
+                patch("runtime.tree.execute_provider", side_effect=AssertionError("must not execute")),
+                redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                main([str(plan), "--manifest", str(manifest), "--allow-provider-fallback"])
+            self.assertFalse(manifest.exists())
     def test_direct_nodes_also_require_an_explicit_model_tier(self):
         with self.assertRaisesRegex(ValueError, "model_tier"):
             RuntimeTreeNode("direct", "work")

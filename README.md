@@ -120,7 +120,7 @@ The runtime accepts a small JSON plan. Each node names its provider, explicit se
 }
 ```
 
-Replace the example dependency SHA with the accepted predecessor commit already materialized in each dependent node's baseline; every dependency requires an exact immutable mapping. Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --repo . --worktree-root .worktrees --receipt-dir .codecanopy/receipts --accept-completed` only when a successful CLI exit is the explicit leaf check. Trusted filesystem roots are CLI arguments and are rejected inside the JSON plan. Without `--accept-completed`, results remain `returned`. Add `--allow-provider-fallback` only when unavailable Claude work may be disclosed to Codex. Completed manifests remain inspectable but cannot authorize another execution.
+Replace the example dependency SHA with the accepted predecessor commit already materialized in each dependent node's baseline; every dependency requires an exact immutable mapping. Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --repo . --worktree-root .worktrees --receipt-dir .codecanopy/receipts --accept-completed` only when a successful CLI exit is the explicit leaf check. Trusted filesystem roots are CLI arguments and are rejected inside the JSON plan. Without `--accept-completed`, results remain `returned`. Catalog-backed runs do not translate a frozen Claude alias to Codex: an unavailable Claude provider blocks the node. Completed manifests remain inspectable but cannot authorize another execution.
 
 Inspect an existing local run without dispatching a provider:
 

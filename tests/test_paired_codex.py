@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from benchmarks import paired_codex
 from benchmarks.model_routing import ModelSettings, RoutingConfig
+from runtime.model_catalog import ResolvedCatalog, RoleModel
 from runtime import tree as runtime_tree
 from runtime.providers import ProviderCapability, ProviderResult
 
@@ -49,6 +50,22 @@ def fake_run_contract():
         sandbox="read-only",
         acceptance_contract_hash="c" * 64,
     )
+
+
+def frozen_codex_catalog() -> ResolvedCatalog:
+    roles = {
+        "lead": RoleModel("frontier-next", "high"),
+        "expert": RoleModel("balanced-next", "high"),
+        "reviewer": RoleModel("balanced-next", "high"),
+        "worker": RoleModel("economy-next", "medium"),
+    }
+    payload = {
+        "provider": "codex",
+        "source": "codex_app_server",
+        "source_version": "0.1",
+        "roles": {tier: {"model": value.model, "reasoning_effort": value.reasoning_effort} for tier, value in roles.items()},
+    }
+    return ResolvedCatalog("codex", "codex_app_server", "0.1", roles, sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
 
 
 def fake_case_snapshots():
@@ -318,6 +335,29 @@ def write_complete_records_and_receipts_for_test(seed=41):
 
 
 class PairedCodexTests(unittest.TestCase):
+    def test_bundled_automatic_schedule_resolves_once_to_exact_catalog_models(self):
+        schedule, cases, config = paired_codex._build_command_schedule(41)
+        catalog = frozen_codex_catalog()
+        calls = []
+        executable, resolved_config = paired_codex._resolve_command_schedule(
+            schedule, cases, config, resolver=lambda *args: (calls.append(args), catalog)[1]
+        )
+
+        self.assertEqual(1, len(calls))
+        self.assertTrue(all(
+            invocation.requested_model != "auto"
+            for plan in executable.execution_plans
+            for invocation in plan.invocations
+        ))
+        self.assertEqual(catalog.catalog_hash, executable.run_contract.model_catalog_snapshot["catalog_hash"])
+        self.assertEqual("frontier-next", resolved_config.models["lead"].model)
+        fields = paired_codex._catalog_request_fields(executable.run_contract)
+        self.assertEqual(catalog.catalog_hash, fields["model_catalog_hash"])
+        self.assertEqual(executable.run_contract.model_catalog_snapshot, fields["model_catalog_snapshot"])
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "unresolved automatic"):
+                paired_codex._persist_schedule(Path(directory) / "unresolved.jsonl", schedule)
+
     def test_schedule_freezes_oracle_counts_before_dispatch(self):
         schedule, _, _ = paired_codex._build_command_schedule(41)
         self.assertEqual(
@@ -2021,6 +2061,9 @@ class PairedCodexTests(unittest.TestCase):
         ))
 
         schedule, cases, config = paired_codex._build_command_schedule(41)
+        schedule, config = paired_codex._resolve_command_schedule(
+            schedule, cases, config, resolver=lambda *_args: frozen_codex_catalog()
+        )
         entry = schedule.entries[0]
         snapshot = next(item for item in schedule.cases if item.case_id == entry.case_id)
         plan = next(

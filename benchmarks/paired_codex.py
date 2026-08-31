@@ -30,10 +30,13 @@ from runtime.providers import (
     append_proof_receipt,
     execute_provider,
     provider_capability,
+    validate_model_catalog_snapshot,
 )
+from runtime.model_catalog import ResolvedCatalog, RoleModel, resolve_model_catalog
 from runtime.safeio import ensure_private_directory, open_private, read_regular_limited
 from runtime.tree import ReceiptEvidenceError, TreeNode, run_tree
 from benchmarks.model_routing import (
+    ModelSettings,
     REASONING_EFFORTS,
     NodeSignal,
     RoutingConfig,
@@ -78,6 +81,7 @@ class RunContract:
     timeout_seconds: float
     sandbox: str
     acceptance_contract_hash: str
+    model_catalog_snapshot: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +183,8 @@ def _validate_run_contract(contract: RunContract) -> None:
         or contract.timeout_seconds <= 0
     ):
         raise ValueError("run contract timeout must be a positive finite number")
+    if contract.model_catalog_snapshot is not None:
+        validate_model_catalog_snapshot(contract.model_catalog_snapshot, "codex")
 
 
 def _schedule_entries(seed: int) -> tuple[ScheduleEntry, ...]:
@@ -301,7 +307,7 @@ def _schedule_from_record(record: object) -> BenchmarkSchedule:
         row["run_contract"],
         {
             "benchmark_version", "scorer_version", "cli_version", "adapter_fingerprint",
-            "routing_config_hash", "timeout_seconds", "sandbox", "acceptance_contract_hash",
+            "routing_config_hash", "timeout_seconds", "sandbox", "acceptance_contract_hash", "model_catalog_snapshot",
         },
         "run contract",
     ))
@@ -1967,6 +1973,24 @@ def _invoke_direct(
     return invocation, parsed, duration
 
 
+def _catalog_request_fields(contract: RunContract) -> dict[str, object]:
+    if contract.model_catalog_snapshot is None:
+        return {}
+    snapshot = validate_model_catalog_snapshot(contract.model_catalog_snapshot, "codex")
+    return {"model_catalog_hash": snapshot["catalog_hash"], "model_catalog_snapshot": snapshot}
+
+
+def _catalog_from_contract(contract: RunContract) -> ResolvedCatalog | None:
+    if contract.model_catalog_snapshot is None:
+        return None
+    snapshot = validate_model_catalog_snapshot(contract.model_catalog_snapshot, "codex")
+    roles = {
+        tier: RoleModel(setting["model"], setting["reasoning_effort"])
+        for tier, setting in snapshot["roles"].items()
+    }
+    return ResolvedCatalog("codex", snapshot["source"], snapshot["source_version"], roles, snapshot["catalog_hash"])
+
+
 def _arm_record(
     entry: ScheduleEntry,
     seed: int,
@@ -2029,6 +2053,8 @@ def _validate_arm_inputs(
     if not isinstance(config, RoutingConfig):
         raise ValueError("benchmark arm requires the pre-dispatch routing config")
     _validate_run_contract(contract)
+    if any(item.requested_model == "auto" for item in execution_plan.invocations):
+        raise ValueError("benchmark execution requires a resolved exact model schedule")
     if snapshot.case_id != case.case_id:
         raise ValueError("case snapshot does not match case")
     expected_plan = build_arm_execution_plan(case, expected_arm, config)
@@ -2101,6 +2127,7 @@ def run_sequential_arm(
             write_access=False,
             model=settings.requested_model,
             reasoning_effort=settings.requested_reasoning_effort,
+            **_catalog_request_fields(contract),
         )
         receipt = state_root / "receipts" / _schedule_slug(entry) / "lead.jsonl"
         try:
@@ -2217,6 +2244,7 @@ def run_canopy_arm(
         slug = _schedule_slug(entry)
         receipt_dir = state_root / "receipts" / slug
         manifest_path = state_root / "manifests" / f"{slug}.jsonl"
+        catalog = _catalog_from_contract(contract)
         receipt_failed_nodes: set[str] = set()
         if manifest_path.exists() or any((receipt_dir / f"{node_id}.jsonl").exists() for node_id in planned_ids):
             raise ValueError("benchmark tree evidence paths must be fresh")
@@ -2236,6 +2264,8 @@ def run_canopy_arm(
                     decisions[node.node_id].requested_reasoning_effort,
                 ),
                 execution_policy_hash=contract.routing_config_hash,
+                provider_catalogs={"codex": catalog} if catalog is not None else None,
+                require_provider_catalogs=catalog is not None,
             )
         except KeyboardInterrupt:
             invocations = _leaf_invocations(
@@ -2304,6 +2334,7 @@ def run_canopy_arm(
                     write_access=False,
                     model=reviewer.requested_model,
                     reasoning_effort=reviewer.requested_reasoning_effort,
+                    **_catalog_request_fields(contract),
                 )
                 try:
                     invocation, reviewer_parsed, _ = _invoke_direct(
@@ -2434,7 +2465,71 @@ def _build_command_schedule(
     return build_schedule(seed, contract, snapshots, cases, config), cases, config
 
 
+def _resolve_command_schedule(
+    schedule: BenchmarkSchedule,
+    cases: Sequence[CaseDefinition],
+    config: RoutingConfig,
+    *,
+    resolver: Callable[[str, Mapping[str, RoleModel]], ResolvedCatalog] = resolve_model_catalog,
+) -> tuple[BenchmarkSchedule, RoutingConfig]:
+    """Resolve the bundled automatic selectors once before executable persistence."""
+    if all(
+        invocation.requested_model != "auto"
+        for plan in schedule.execution_plans
+        for invocation in plan.invocations
+    ):
+        return schedule, config
+    catalog = resolver(
+        "codex",
+        {
+            tier: RoleModel(setting.model, setting.reasoning_effort)
+            for tier, setting in config.models.items()
+        },
+    )
+    snapshot = validate_model_catalog_snapshot(
+        {
+            "provider": catalog.provider,
+            "source": catalog.source,
+            "source_version": catalog.source_version,
+            "roles": {
+                tier: {"model": setting.model, "reasoning_effort": setting.reasoning_effort}
+                for tier, setting in catalog.roles.items()
+            },
+            "catalog_hash": catalog.catalog_hash,
+        },
+        "codex",
+    )
+    resolved_config = replace(
+        config,
+        models={
+            tier: ModelSettings(catalog.roles[tier].model, catalog.roles[tier].reasoning_effort)
+            for tier, setting in config.models.items()
+        },
+    )
+    resolved_contract = replace(schedule.run_contract, model_catalog_snapshot=snapshot)
+    return build_schedule(schedule.seed, resolved_contract, schedule.cases, cases, resolved_config), resolved_config
+
+
+def _config_from_frozen_schedule(schedule: BenchmarkSchedule, config: RoutingConfig) -> RoutingConfig:
+    catalog = _catalog_from_contract(schedule.run_contract)
+    if catalog is None:
+        return config
+    return replace(
+        config,
+        models={
+            tier: ModelSettings(catalog.roles[tier].model, catalog.roles[tier].reasoning_effort)
+            for tier, setting in config.models.items()
+        },
+    )
+
+
 def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecord, ...]:
+    if any(
+        invocation.requested_model == "auto"
+        for plan in schedule.execution_plans
+        for invocation in plan.invocations
+    ):
+        raise ValueError("unresolved automatic model schedule cannot be persisted")
     serialized = _serialize_result_record({"kind": "schedule", **asdict(schedule)})
     with open_private(path, append=True, repair_permissions=False) as handle:
         if fcntl is not None:
@@ -2465,6 +2560,11 @@ def _persist_schedule(path: Path, schedule: BenchmarkSchedule) -> tuple[ArmRecor
 def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
     state_root = ensure_private_directory(state_root)
     schedule, cases, config = _build_command_schedule(seed)
+    if results.exists():
+        schedule, _ = load_results(results)
+        config = _config_from_frozen_schedule(schedule, config)
+    else:
+        schedule, config = _resolve_command_schedule(schedule, cases, config)
     _persist_schedule(results, schedule)
     definitions = {case.case_id: case for case in cases}
     for entry in schedule.entries[:2]:
@@ -2496,6 +2596,18 @@ def _acceptance_command(results: Path, state_root: Path, seed: int) -> int:
 
 def _run_command(results: Path, seed: int) -> int:
     schedule, _, _ = _build_command_schedule(seed)
+    if any(
+        invocation.requested_model == "auto"
+        for plan in schedule.execution_plans
+        for invocation in plan.invocations
+    ):
+        _print({
+            "command": "run",
+            "execute": False,
+            "incomplete_reasons": ["catalog_resolution_required"],
+            "schedule_entries": len(schedule.entries),
+        })
+        return 1
     _persist_schedule(results, schedule)
     if CODEX_0147.actual_model_path is None:
         _print({

@@ -159,6 +159,39 @@ class ModelCatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(ModelCatalogError, "JSON-RPC"):
             resolve_model_catalog("codex", automatic_roles(), which=lambda _: "/bin/codex", runner=_runner(output))
 
+    def test_rejects_duplicate_json_rpc_and_nested_catalog_members(self) -> None:
+        valid = [
+            _entry("frontier-next", default=True),
+            _entry("balanced-next", efforts=["high", "ultra"]),
+            _entry("economy-next", efforts=["medium", "max"]),
+        ]
+        duplicate_result = "\n".join((
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
+            '{"jsonrpc":"2.0","id":2,"result":{"data":[]},"result":{"data":[]}}',
+        ))
+        duplicate_envelope = "\n".join((
+            '{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"result":{}}',
+            json.dumps({"jsonrpc": "2.0", "id": 2, "result": {"data": []}}),
+        ))
+        for name, token, replacement in (
+            ("hidden", '"hidden": false', '"hidden": true, "hidden": false'),
+            ("model", '"model": "frontier-next"', '"model": "frontier-next", "model": "frontier-next"'),
+            ("default", '"isDefault": true', '"isDefault": true, "isDefault": false'),
+            ("effort", '"reasoningEffort": "high"', '"reasoningEffort": "high", "reasoningEffort": "high"'),
+            ("marker", '"availabilityNux": null', '"availabilityNux": null, "availabilityNux": null'),
+        ):
+            entry = json.dumps(valid[0]).replace(token, replacement, 1)
+            output = "\n".join((
+                json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
+                '{"jsonrpc":"2.0","id":2,"result":{"data":[' + entry + ',' + json.dumps(valid[1]) + ',' + json.dumps(valid[2]) + ']}}',
+            ))
+            with self.subTest(name=name), self.assertRaises(ModelCatalogError):
+                resolve_model_catalog("codex", automatic_roles(), which=lambda _: "/bin/codex", runner=_runner(output))
+        with self.assertRaises(ModelCatalogError):
+            resolve_model_catalog("codex", automatic_roles(), which=lambda _: "/bin/codex", runner=_runner(duplicate_result))
+        with self.assertRaises(ModelCatalogError):
+            resolve_model_catalog("codex", automatic_roles(), which=lambda _: "/bin/codex", runner=_runner(duplicate_envelope))
+
     def test_claude_aliases_and_explicit_pins(self) -> None:
         claude = resolve_model_catalog("claude", automatic_roles(), which=lambda _: "/bin/claude")
         self.assertEqual(
@@ -190,8 +223,25 @@ class ModelCatalogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "codecanopy.toml"
             path.write_text("[models.lead]\nmodel = 'bad/model'\nreasoning_effort = 'high'\n", encoding="utf-8")
-            with self.assertRaisesRegex(ModelCatalogError, "models"):
+            with self.assertRaisesRegex(ModelCatalogError, "model_discovery"):
                 load_role_settings(path)
+
+    def test_model_discovery_requires_exact_policy_keys(self) -> None:
+        models = "\n".join(
+            f"[models.{role}]\nmodel = 'auto'\nreasoning_effort = 'high'"
+            for role in ("lead", "expert", "reviewer", "worker")
+        )
+        valid = "[model_discovery]\nmode = 'automatic'\nrelease_channel = 'ga'\nrefresh = 'run_start'\non_failure = 'fail'\n" + models
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "codecanopy.toml"
+            for text in (
+                models,
+                valid.replace("on_failure = 'fail'\n", ""),
+                valid.replace("on_failure = 'fail'\n", "on_failure = 'fail'\nextra = 'no'\n"),
+            ):
+                path.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ModelCatalogError, "model_discovery"):
+                    load_role_settings(path)
 
     def test_bounded_runner_writes_and_closes_json_rpc_input(self) -> None:
         completed = _run_bounded(
