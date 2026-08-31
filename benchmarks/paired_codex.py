@@ -2159,6 +2159,12 @@ def run_canopy_arm(
         planned_leaves = execution_plan.invocations[:-1]
         reviewer = execution_plan.invocations[-1]
         decisions = {item.node_id: item for item in planned_leaves}
+        model_tiers = {
+            node.node_id: route_node(
+                NodeSignal(node.node_id, node.role, node.complexity_score, node.size_score), config
+            ).tier
+            for node in case.dag
+        }
         scopes = {node.node_id: frozenset(node.scope) for node in case.dag}
         leaves = tuple(TreeNode(
             node_id=node.node_id,
@@ -2166,6 +2172,7 @@ def run_canopy_arm(
             provider="codex",
             baseline=baseline,
             timeout_seconds=contract.timeout_seconds,
+            model_tier=model_tiers[node.node_id],
         ) for node in case.dag)
         planned_ids = tuple(node.node_id for node in leaves)
         artifacts: dict[str, str] = {}

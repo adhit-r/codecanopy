@@ -12,7 +12,13 @@ from unittest.mock import patch
 from runtime.manifest import ManifestError, ManifestStore
 from runtime.model_catalog import ResolvedCatalog, RoleModel
 from runtime.providers import ProviderResult
-from runtime.tree import MAX_NODES, MAX_PLAN_BYTES, TreeNode, _load_plan, main, run_tree
+from runtime.tree import MAX_NODES, MAX_PLAN_BYTES, TreeNode as RuntimeTreeNode, _load_plan, main, run_tree
+
+
+def TreeNode(*args, **kwargs):
+    """Build ordinary test nodes with an explicit non-routing worker tier."""
+    kwargs.setdefault("model_tier", "worker")
+    return RuntimeTreeNode(*args, **kwargs)
 
 
 def catalog(provider, source, source_version, models):
@@ -57,6 +63,91 @@ CLAUDE_CATALOG = catalog(
 
 
 class MixedTreeTests(unittest.TestCase):
+    def test_direct_nodes_also_require_an_explicit_model_tier(self):
+        with self.assertRaisesRegex(ValueError, "model_tier"):
+            RuntimeTreeNode("direct", "work")
+
+    def test_cli_plan_requires_a_valid_model_tier_before_discovery_or_manifest_creation(self):
+        for node in (
+            {"id": "missing", "prompt": "define", "provider": "codex"},
+            {"id": "invalid", "prompt": "define", "provider": "codex", "model_tier": "smallest"},
+        ):
+            with self.subTest(node=node), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                plan = root / "plan.json"
+                manifest = root / "run.jsonl"
+                plan.write_text(json.dumps({"run_id": "tier-required", "nodes": [node]}), encoding="utf-8")
+                discoveries = []
+                executions = []
+                with (
+                    patch("runtime.tree.resolve_model_catalog", side_effect=lambda *_args: discoveries.append(True)),
+                    patch("runtime.tree.execute_provider", side_effect=lambda _request: executions.append(True)),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    with self.assertRaisesRegex(ValueError, "model_tier"):
+                        main([str(plan), "--manifest", str(manifest)])
+                self.assertEqual([], discoveries)
+                self.assertEqual([], executions)
+                self.assertFalse(manifest.exists())
+
+    def test_frozen_catalog_maps_every_explicit_tier_for_each_provider(self):
+        requests = []
+
+        def execute(request):
+            requests.append((request.preferred_provider, request.model, request.reasoning_effort))
+            return ProviderResult("completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {})
+
+        tiers = ("lead", "expert", "reviewer", "worker")
+        with tempfile.TemporaryDirectory() as directory:
+            run_tree(
+                [
+                    TreeNode(f"{provider}-{tier}", "work", provider, model_tier=tier)
+                    for provider in ("codex", "claude")
+                    for tier in tiers
+                ],
+                manifest_path=Path(directory) / "run.jsonl",
+                run_id="tier-map",
+                provider_catalogs={"codex": CODEX_CATALOG, "claude": CLAUDE_CATALOG},
+                require_provider_catalogs=True,
+                execute=execute,
+            )
+
+        self.assertEqual(
+            [
+                (provider, catalog.roles[tier].model, catalog.roles[tier].reasoning_effort)
+                for provider, catalog in (("codex", CODEX_CATALOG), ("claude", CLAUDE_CATALOG))
+                for tier in tiers
+            ],
+            requests,
+        )
+
+    def test_cli_rejects_an_unsafe_manifest_without_discovery_or_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = root / "plan.json"
+            manifest = root / "run.jsonl"
+            plan.write_text(
+                json.dumps(
+                    {
+                        "run_id": "unsafe-manifest",
+                        "nodes": [{"id": "node", "prompt": "define", "provider": "codex", "model_tier": "lead"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manifest.write_text("{not-json}\n", encoding="utf-8")
+            discoveries = []
+            executions = []
+            with (
+                patch("runtime.tree.resolve_model_catalog", side_effect=lambda *_args: discoveries.append(True)),
+                patch("runtime.tree.execute_provider", side_effect=lambda _request: executions.append(True)),
+                redirect_stdout(io.StringIO()),
+            ):
+                with self.assertRaises(ManifestError):
+                    main([str(plan), "--manifest", str(manifest)])
+            self.assertEqual([], discoveries)
+            self.assertEqual([], executions)
+
     def test_provider_catalog_snapshots_bind_mixed_receipts_without_raw_catalogs(self):
         requests = []
 

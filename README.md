@@ -107,15 +107,15 @@ Codex app tasks, local Codex CLI nodes, and local Claude CLI nodes collaborate t
 
 ### Run a mixed-provider tree locally
 
-The runtime accepts a small JSON plan. Each node names its provider and dependencies; the runner records results, receipts, and recovery state without merging or pushing:
+The runtime accepts a small JSON plan. Each node names its provider, explicit selected `model_tier`, and dependencies; a missing or invalid tier blocks before catalog discovery. The runner records results, receipts, and recovery state without merging or pushing:
 
 ```json
 {
   "run_id": "mixed-example",
   "nodes": [
-    {"id": "contract", "provider": "codex", "prompt": "Define the contract."},
-    {"id": "backend", "provider": "codex", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the backend."},
-    {"id": "ui", "provider": "claude", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the UI."}
+    {"id": "contract", "provider": "codex", "model_tier": "lead", "prompt": "Define the contract."},
+    {"id": "backend", "provider": "codex", "model_tier": "expert", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the backend."},
+    {"id": "ui", "provider": "claude", "model_tier": "expert", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the UI."}
   ]
 }
 ```

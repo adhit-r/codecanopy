@@ -45,6 +45,10 @@ class ManifestError(ValueError):
     """Raised when a manifest cannot be safely reconstructed or extended."""
 
 
+class UnknownRunError(ManifestError):
+    """Raised only after a manifest is safely reconstructed without a requested run."""
+
+
 class ManifestStore:
     """A JSONL event log. Snapshots are reconstructed; existing rows are never rewritten."""
 
@@ -220,12 +224,12 @@ class ManifestStore:
         try:
             return copy.deepcopy(runs[run_id])
         except KeyError as exc:
-            raise ManifestError(f"unknown run: {run_id}") from exc
+            raise UnknownRunError(f"unknown run: {run_id}") from exc
 
     def _require_run(self, run_id: str) -> dict[str, Any]:
         runs = self._runs()
         if run_id not in runs:
-            raise ManifestError(f"unknown run: {run_id}")
+            raise UnknownRunError(f"unknown run: {run_id}")
         return runs[run_id]
 
     def _require_node(self, run_id: str, node_id: str) -> dict[str, Any]:

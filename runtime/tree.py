@@ -12,7 +12,7 @@ import re
 import subprocess
 from typing import Callable, Iterable, Mapping, Sequence
 
-from .manifest import ManifestError, ManifestStore
+from .manifest import ManifestError, ManifestStore, UnknownRunError
 from .model_catalog import ResolvedCatalog, load_role_settings, resolve_model_catalog
 from .safeio import read_regular_limited
 from .providers import (
@@ -57,7 +57,7 @@ class TreeNode:
     dependency_commits: Mapping[str, str] = field(default_factory=dict)
     timeout_seconds: float = 300
     worktree_name: str | None = None
-    model_tier: str = "worker"
+    model_tier: str | None = None
 
     def __post_init__(self) -> None:
         if not self.node_id or len(self.node_id) > 64 or not _NODE_ID.fullmatch(self.node_id):
@@ -87,15 +87,19 @@ class TreeNode:
         baseline = value.get("baseline", "HEAD")
         timeout = value.get("timeout_seconds", 300)
         worktree_name = value.get("worktree_name")
-        model_tier = value.get("model_tier", "worker")
+        if "model_tier" not in value:
+            raise ValueError("model_tier is required")
+        model_tier = value["model_tier"]
         if not isinstance(node_id, str) or not isinstance(prompt, str):
             raise ValueError("node id and prompt must be strings")
         if not isinstance(provider, str) or not isinstance(baseline, str):
             raise ValueError("provider and baseline must be strings")
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise ValueError("timeout_seconds must be a number")
-        if (worktree_name is not None and not isinstance(worktree_name, str)) or not isinstance(model_tier, str):
-            raise ValueError("worktree_name and model_tier must be strings")
+        if worktree_name is not None and not isinstance(worktree_name, str):
+            raise ValueError("worktree_name must be a string")
+        if not isinstance(model_tier, str):
+            raise ValueError("model_tier must be a string")
         dependencies_value = value.get("depends_on", ())
         if not isinstance(dependencies_value, (list, tuple)) or not all(isinstance(item, str) for item in dependencies_value):
             raise ValueError("depends_on must be an array of strings")
@@ -155,7 +159,7 @@ def run_tree(
     store = ManifestStore(manifest_path)
     try:
         snapshot = store.snapshot(run_id)
-    except ManifestError:
+    except UnknownRunError:
         store.create_run(
             run_id,
             state="planned",
@@ -496,7 +500,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     store = ManifestStore(args.manifest)
     try:
         store.snapshot(run_id)
-    except ManifestError:
+    except UnknownRunError:
         settings = load_role_settings(args.config)
         provider_catalogs = {
             provider: resolve_model_catalog(provider, settings)
