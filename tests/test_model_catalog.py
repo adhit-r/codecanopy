@@ -98,12 +98,35 @@ class ModelCatalogTests(unittest.TestCase):
             ("unsupported effort", _entry("frontier-next", default=True, efforts=["low"])),
         )
         for name, lead in unsafe:
-            with self.subTest(name=name), self.assertRaisesRegex(ModelCatalogError, "eligible lead"):
+            with self.subTest(name=name), self.assertRaises(ModelCatalogError):
                 resolve_model_catalog(
                     "codex",
                     automatic_roles(),
                     which=lambda _: "/bin/codex",
                     runner=_runner(_catalog_output([lead])),
+                )
+
+    def test_rejects_an_unsafe_entry_even_when_other_roles_are_eligible(self) -> None:
+        eligible = [
+            _entry("frontier-next", default=True),
+            _entry("balanced-next", efforts=["high", "ultra"]),
+            _entry("economy-next", efforts=["medium", "max"]),
+        ]
+        unsafe = (
+            _entry("hidden-next", hidden=True),
+            _entry("notice-next", availabilityNux="unavailable"),
+            _entry("specialty-next", modelSpecialty="research"),
+            _entry("upgrade-next", upgrade="frontier-next"),
+            _entry("empty-specialty", modelSpecialty=""),
+            _entry("empty-upgrade", upgrade=""),
+        )
+        for entry in unsafe:
+            with self.subTest(entry=entry["model"]), self.assertRaisesRegex(ModelCatalogError, "unsafe"):
+                resolve_model_catalog(
+                    "codex",
+                    automatic_roles(),
+                    which=lambda _: "/bin/codex",
+                    runner=_runner(_catalog_output([*eligible, entry])),
                 )
 
     def test_rejects_ambiguous_default_and_invalid_rpc_data(self) -> None:
@@ -121,6 +144,21 @@ class ModelCatalogTests(unittest.TestCase):
             with self.subTest(output=output[:30]), self.assertRaises(ModelCatalogError):
                 resolve_model_catalog("codex", automatic_roles(), which=lambda _: "/bin/codex", runner=_runner(output))
 
+    def test_rejects_json_without_the_json_rpc_2_envelope(self) -> None:
+        entries = [
+            _entry("frontier-next", default=True),
+            _entry("balanced-next", efforts=["high", "ultra"]),
+            _entry("economy-next", efforts=["medium", "max"]),
+        ]
+        output = "\n".join(
+            (
+                json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
+                json.dumps({"id": 2, "result": {"data": entries}}),
+            )
+        )
+        with self.assertRaisesRegex(ModelCatalogError, "JSON-RPC"):
+            resolve_model_catalog("codex", automatic_roles(), which=lambda _: "/bin/codex", runner=_runner(output))
+
     def test_claude_aliases_and_explicit_pins(self) -> None:
         claude = resolve_model_catalog("claude", automatic_roles(), which=lambda _: "/bin/claude")
         self.assertEqual(
@@ -135,6 +173,16 @@ class ModelCatalogTests(unittest.TestCase):
             _entry("economy-next", efforts=["medium", "max"]),
         ])))
         self.assertEqual(RoleModel("controlled-rollout", "high"), catalog.roles["lead"])
+
+    def test_automatic_reviewer_reuses_a_pinned_expert(self) -> None:
+        settings = automatic_roles()
+        settings["expert"] = RoleModel("pinned-expert", "high")
+        catalog = resolve_model_catalog("codex", settings, which=lambda _: "/bin/codex", runner=_runner(_catalog_output([
+            _entry("frontier-next", default=True),
+            _entry("balanced-next", efforts=["high", "ultra"]),
+            _entry("economy-next", efforts=["medium", "max"]),
+        ])))
+        self.assertEqual("pinned-expert", catalog.roles["reviewer"].model)
 
     def test_missing_executable_and_invalid_config_fail_closed(self) -> None:
         with self.assertRaisesRegex(ModelCatalogError, "executable"):

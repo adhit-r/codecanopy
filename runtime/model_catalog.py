@@ -172,6 +172,8 @@ def _json_rpc_responses(output: object) -> dict[int, dict[str, object]]:
             raise ModelCatalogError("Codex JSON-RPC output is malformed") from error
         if not isinstance(message, dict):
             raise ModelCatalogError("Codex JSON-RPC output is malformed")
+        if message.get("jsonrpc") != "2.0":
+            raise ModelCatalogError("Codex JSON-RPC response is invalid")
         identifier = message.get("id")
         if type(identifier) is int and identifier in (1, 2):
             if identifier in responses or "error" in message or not isinstance(message.get("result"), dict):
@@ -182,7 +184,7 @@ def _json_rpc_responses(output: object) -> dict[int, dict[str, object]]:
     return responses
 
 
-def _parse_candidate(value: object) -> _CodexModel | None:
+def _parse_candidate(value: object) -> _CodexModel:
     if not isinstance(value, dict):
         raise ModelCatalogError("Codex model entry is malformed")
     model = value.get("model")
@@ -198,7 +200,7 @@ def _parse_candidate(value: object) -> _CodexModel | None:
         raise ModelCatalogError("Codex model entry has invalid reasoning efforts")
     notices = tuple(_marker(value, name) for name in ("availabilityNux", "modelSpecialty", "upgrade"))
     if hidden or any(notice for notice in notices):
-        return None
+        raise ModelCatalogError("Codex catalog contains an unsafe model entry")
     return _CodexModel(model, normalized_efforts, is_default)
 
 
@@ -226,44 +228,47 @@ def _marker(entry: Mapping[str, object], name: str) -> str | None:
         return value["message"] or "notice"
     if not isinstance(value, str):
         raise ModelCatalogError(f"Codex model entry has an invalid {name}")
-    return value or None
+    if not value:
+        raise ModelCatalogError(f"Codex catalog contains an unsafe {name}")
+    return value
 
 
 def _resolve_codex_roles(
-    settings: Mapping[str, RoleModel], candidates: tuple[_CodexModel | None, ...]
+    settings: Mapping[str, RoleModel], candidates: tuple[_CodexModel, ...]
 ) -> dict[str, RoleModel]:
-    eligible = tuple(candidate for candidate in candidates if candidate is not None)
     roles = {role: setting for role, setting in settings.items() if setting.model != "auto"}
     if settings["lead"].model == "auto":
-        defaults = [candidate for candidate in eligible if candidate.is_default and settings["lead"].reasoning_effort in candidate.efforts]
+        defaults = [candidate for candidate in candidates if candidate.is_default and settings["lead"].reasoning_effort in candidate.efforts]
         if len(defaults) != 1:
             raise ModelCatalogError("Codex catalog has no unique eligible lead")
         roles["lead"] = RoleModel(defaults[0].model, settings["lead"].reasoning_effort)
-    expert = next(
-        (
-            candidate
-            for candidate in eligible
-            if not candidate.is_default
-            and "ultra" in candidate.efforts
-            and all(
-                settings[role].reasoning_effort in candidate.efforts
-                for role in ("expert", "reviewer")
-                if settings[role].model == "auto"
-            )
-        ),
-        None,
-    )
-    if any(settings[role].model == "auto" for role in ("expert", "reviewer")):
+    if settings["expert"].model == "auto":
+        expert = next(
+            (
+                candidate
+                for candidate in candidates
+                if not candidate.is_default
+                and "ultra" in candidate.efforts
+                and all(
+                    settings[role].reasoning_effort in candidate.efforts
+                    for role in ("expert", "reviewer")
+                    if settings[role].model == "auto"
+                )
+            ),
+            None,
+        )
         if expert is None:
             raise ModelCatalogError("Codex catalog has no eligible expert")
-        for role in ("expert", "reviewer"):
-            if settings[role].model == "auto":
-                roles[role] = RoleModel(expert.model, settings[role].reasoning_effort)
+        roles["expert"] = RoleModel(expert.model, settings["expert"].reasoning_effort)
+        if settings["reviewer"].model == "auto":
+            roles["reviewer"] = RoleModel(expert.model, settings["reviewer"].reasoning_effort)
+    elif settings["reviewer"].model == "auto":
+        roles["reviewer"] = RoleModel(settings["expert"].model, settings["reviewer"].reasoning_effort)
     if settings["worker"].model == "auto":
         worker = next(
             (
                 candidate
-                for candidate in eligible
+                for candidate in candidates
                 if not candidate.is_default
                 and "max" in candidate.efforts
                 and "ultra" not in candidate.efforts
