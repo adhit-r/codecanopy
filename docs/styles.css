@@ -120,6 +120,8 @@ h1 { max-width: 11.5ch; margin: 0; font-size: clamp(3rem, 5vw, 5.55rem); line-he
 .install-command { margin-top: 27px; max-width: 460px; padding: 12px 14px 13px; background: #e2ebeb; border: 1px solid var(--rule); }
 .install-command > p { margin: 0 0 7px; color: var(--muted); font-size: .72rem; }
 .install-command code { display: block; overflow-wrap: anywhere; font: .76rem/1.55 var(--mono); }
+.install-command > .upgrade-label { margin-top: 10px; }
+.release-link { display: inline-block; margin-top: 9px; color: var(--blue); font: 700 .72rem/1.4 var(--sans); }
 
 .route-rack { min-width: 0; margin: 0; padding: 0 0 14px; background: var(--paper-strong); border: 1px solid var(--ink); }
 .route-rack figcaption { padding: 11px 18px; color: #fff; background: var(--ink); font-size: .92rem; }

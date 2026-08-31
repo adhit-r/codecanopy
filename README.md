@@ -6,8 +6,17 @@ CodeCanopy is an engineering orchestration plugin with local runtime support for
 
 ## Install
 
+Rolling installation from the latest reviewed `main` branch:
+
 ```bash
 codex plugin marketplace add adhit-r/codecanopy --ref main
+codex plugin add code-canopy@codecanopy
+```
+
+Pin a clean installation to v0.5.0 instead:
+
+```bash
+codex plugin marketplace add adhit-r/codecanopy --ref v0.5.0
 codex plugin add code-canopy@codecanopy
 ```
 
@@ -15,6 +24,17 @@ Restart the Codex or ChatGPT desktop app after installation, then start a new ta
 The marketplace package installs the skill. The optional Python runtime commands
 below currently require a repository checkout; packaging that runtime is the
 next release gate.
+
+## Upgrade an existing installation
+
+```bash
+codex plugin marketplace upgrade codecanopy
+codex plugin add code-canopy@codecanopy
+```
+
+Start a new task after upgrading so Codex loads the new plugin version. CodeCanopy
+cannot remotely overwrite an installed plugin: each user controls when their local
+marketplace snapshot and installation are refreshed.
 
 ## Use
 
@@ -91,7 +111,7 @@ reasoning_effort = "high"
 
 The strongest configured tier owns requirements, material questions, integration, and replanning. Smaller configured tiers receive bounded work. Model availability and host limits still apply.
 
-Provider and timeout are per-node values, not TOML settings. Local support checks an installed CLI, prepends a fixed trust boundary, and invokes Codex or Claude without a shell. Delegated Codex runs ignore user config and rules, disable project instruction loading and workspace network, prevent login shells, strip the child-shell environment, require the configured sandbox, and persist no session. Claude runs in safe, non-persistent mode with only bounded file tools; customizations, Bash, agents, browser, slash-command, web, and MCP tools are unavailable. The root runs acceptance checks. Fallback is denied by default; unavailable Claude work reaches Codex only after explicit CLI consent. The provider subprocess receives an allowlisted environment and bounded output capture. CodeCanopy does not claim that provider policies or model quality are equivalent.
+Provider and timeout are per-node values, not TOML settings. Local support checks an installed CLI, prepends a fixed trust boundary, and invokes Codex or Claude without a shell. Delegated Codex runs ignore user config and rules, disable project instruction loading and workspace network, prevent login shells, strip the child-shell environment, require the configured sandbox, and persist no session. Claude runs in safe, non-persistent mode with only bounded file tools; customizations, Bash, agents, browser, slash-command, web, and MCP tools are unavailable. The root runs acceptance checks. Catalog-backed CLI runs never translate a frozen Claude alias to Codex; an unavailable Claude provider blocks the node. The legacy direct provider API permits fallback only when the caller authorized the exact transition before dispatch and supplied no provider-specific model setting. The provider subprocess receives an allowlisted environment and bounded output capture. CodeCanopy does not claim that provider policies or model quality are equivalent.
 
 ## Safety boundary
 
