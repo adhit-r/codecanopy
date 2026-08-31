@@ -24,8 +24,13 @@ whitespace check.
 1. Update `plugins/code-canopy/.codex-plugin/plugin.json` and `CHANGELOG.md`.
 2. Confirm the README, product metadata, and Pages copy agree about shipped
    capability and evidence tier.
-3. Create an immutable tag such as `v0.5.0` only after the checks pass.
-4. Publish the tag and verify the GitHub Pages workflow before announcing the
+3. Merge the protected release pull request after its checks and review gates
+   pass.
+4. Create an immutable annotated tag such as `v0.5.0` at that exact merged
+   commit, then publish the tag and its GitHub Release notes.
+5. Verify the release URL and run a clean tag-pinned marketplace install smoke
+   test.
+6. Verify the GitHub Pages workflow and public page before announcing the
    release.
 
 The rolling marketplace source tracks `main`. A release may also publish a
