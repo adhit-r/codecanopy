@@ -4,7 +4,7 @@ All notable CodeCanopy changes are recorded here. Version entries describe
 implemented local behavior only; provider quality, production behavior, and
 durable multi-process recovery remain evidence-gated.
 
-## [Unreleased]
+## [0.5.0] - 2026-09-01
 
 ### Added
 
@@ -16,12 +16,21 @@ durable multi-process recovery remain evidence-gated.
 - Add an evidence-gated paired benchmark contract for tokens, wall-clock time,
   acceptance quality, critical paths, retries, conflicts, and actual
   provider/model identities.
+- Use automatic `auto` role selectors and a fixed GA, run-start discovery policy
+  for new local runs.
+- Freeze the resolved provider catalog hash through execution and resume, and
+  record observed model evidence in receipts.
 
 ### Changed
 
 - Clarify that the current routing fixture proves deterministic policy
   conformance and tier distribution, not token savings, speed, model quality,
   or globally shortest execution.
+- Resolve Codex exact IDs from authenticated structured host metadata and
+  dispatch Claude provider aliases; record a Claude backing ID only when
+  `modelUsage` evidences it. Malformed or incomplete catalogs block dispatch.
+- Document that previews are not intentionally selected and that catalog policy
+  conformance does not establish universal availability or model quality.
 
 ## [0.4.0] - 2026-08-30
 

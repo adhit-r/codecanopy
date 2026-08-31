@@ -4,6 +4,12 @@ schema_version = 1
 # provider command options.
 runtime = "local"
 
+[model_discovery]
+mode = "automatic"
+release_channel = "ga"
+refresh = "run_start"
+on_failure = "fail"
+
 [tree]
 max_depth = 3
 max_children_per_node = 3
@@ -23,17 +29,17 @@ worker_max_score = 0.33
 expert_max_score = 0.66
 
 [models.lead]
-model = "gpt-5.6-sol"
+model = "auto"
 reasoning_effort = "high"
 
 [models.expert]
-model = "gpt-5.6-terra"
+model = "auto"
 reasoning_effort = "high"
 
 [models.worker]
-model = "gpt-5.6-luna"
+model = "auto"
 reasoning_effort = "medium"
 
 [models.reviewer]
-model = "gpt-5.6-terra"
+model = "auto"
 reasoning_effort = "high"

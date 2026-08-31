@@ -33,6 +33,10 @@ The root applies a Leaf Test before delegation. Atomic work stays with one agent
 
 During planning, CodeCanopy estimates each node's normalized complexity and size, computes the weighted routing score from `.codecanopy.toml`, and automatically selects the smallest configured tier allowed by policy. Simple bounded work routes to `worker`, medium work to `expert`, and complex or safety-sensitive work to `lead`; review work routes to `reviewer`, and uncertain work never routes below `expert`. The checked-in deterministic policy benchmark currently passes 10/10 routing cases, rejects 3/3 invalid estimates, and gives 6/10 fixture cases non-lead assignments. It is not evidence of model quality, token savings, latency, or throughput. Run it with `python3 benchmarks/model_routing.py`; use the [paired benchmark contract](benchmarks/README.md) before making comparative claims.
 
+### Automatic model resolution
+
+For each new run, CodeCanopy scores a node, chooses its role tier, resolves the provider-released and account-available catalog once, freezes its catalog hash, dispatches an exact Codex ID or a Claude alias, and records observed model evidence. That frozen catalog remains in effect through execution and resume: a future host default or lower-capability entry can be selected only by the next new run, never midway through a tree. A malformed or incomplete catalog blocks dispatch. Codex exact IDs come from authenticated structured host metadata; Claude aliases are dispatched directly and an exact backing ID is recorded only when `modelUsage` evidences it. Previews are not intentionally selected. These controls do not claim universal provider availability or model quality.
+
 ```text
 Goal lead
 ├─ Architecture parent
@@ -51,6 +55,12 @@ Copy the bundled [`codecanopy.toml`](plugins/code-canopy/skills/code-canopy/asse
 schema_version = 1
 runtime = "local"
 
+[model_discovery]
+mode = "automatic"
+release_channel = "ga"
+refresh = "run_start"
+on_failure = "fail"
+
 [tree]
 max_depth = 3
 max_children_per_node = 3
@@ -61,6 +71,22 @@ max_replans = 1
 [budget]
 root_reserve_percent = 35
 retry_limit = 1
+
+[models.lead]
+model = "auto"
+reasoning_effort = "high"
+
+[models.expert]
+model = "auto"
+reasoning_effort = "high"
+
+[models.worker]
+model = "auto"
+reasoning_effort = "medium"
+
+[models.reviewer]
+model = "auto"
+reasoning_effort = "high"
 ```
 
 The strongest configured tier owns requirements, material questions, integration, and replanning. Smaller configured tiers receive bounded work. Model availability and host limits still apply.
@@ -109,7 +135,7 @@ node. These are local manifest views, not proof that a goal is accepted.
 
 ## Roadmap
 
-- Current release: v0.4.0 hardens the public skill and local runtime against instruction injection, credential leakage, provider confusion, unsafe state files, forged lifecycle replay, unbounded input/output, and worktree substitution. See [CHANGELOG.md](CHANGELOG.md).
+- Current release: v0.5.0 adds automatic, run-frozen provider catalog resolution while retaining the existing safety boundaries. See [CHANGELOG.md](CHANGELOG.md).
 - Next: package the local runtime with the marketplace artifact, add a pinned release workflow, and verify the installed plugin from a clean archive.
 - In progress: run observability now includes `--status` and `--inspect` for reconstructing the critical frontier from a manifest.
 - Tracked work: [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), [current work](https://github.com/adhit-r/codecanopy/issues/1), and the provider/recovery issues [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).

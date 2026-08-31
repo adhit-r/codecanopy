@@ -37,6 +37,8 @@ routing_score = (complexity_weight * complexity_score + size_weight * size_score
 
 Route `routing_score <= worker_max_score` to `worker`, values up to `expert_max_score` to `expert`, and larger values to `lead`. Root, integration, or security-sensitive decisions always use `lead`; explicit review work uses `reviewer`; missing or uncertain signals use at least `expert`. If the selected model is unavailable, return the node to the lead or use a documented safe tier; never silently downgrade.
 
+The bundled selectors are `auto`. At new-run start, after scoring selects a role tier and before any dispatch, resolve the provider-released, account-available catalog once and freeze its hash in the manifest and receipts. The frozen catalog stays in effect through execution and resume; a later host default or lower-capability catalog entry applies only to a new run, never midway through a tree. A malformed, unsafe, or incomplete catalog blocks dispatch. Codex receives exact IDs from authenticated structured host metadata. Claude receives provider aliases; record an exact backing ID only when the completed JSON output has unambiguous `modelUsage` evidence. Previews are not intentionally selected.
+
 ## Integration barriers and collisions
 
 Before accepting a child, its parent verifies every required produced artifact, checks its baseline and assigned paths, runs the child acceptance check, then runs its own integration check. The parent emits one normalized result only after that barrier passes. The root alone accepts the integrated goal and declares completion.

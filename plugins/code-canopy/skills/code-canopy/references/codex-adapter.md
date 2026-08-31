@@ -4,14 +4,14 @@ This adapter maps the provider-neutral runtime contract to current Codex prefere
 
 ## Role preferences
 
-| Role | Preferred Codex model | Reasoning |
+| Role | Codex selector | Reasoning |
 | --- | --- | --- |
-| Lead | `gpt-5.6-sol` | high |
-| Expert | `gpt-5.6-terra` | high |
-| Worker | `gpt-5.6-luna` | medium |
-| Reviewer | `gpt-5.6-terra` | high |
+| Lead | `auto` | high |
+| Expert | `auto` | high |
+| Worker | `auto` | medium |
+| Reviewer | `auto` | high |
 
-Use the smallest capable tier for bounded execution. If a preferred model is unavailable, use only a safe available tier or return the work to the lead. Review and integration must not silently downgrade.
+Use the smallest capable tier for bounded execution. At new-run start, CodeCanopy asks authenticated structured host metadata for the provider-released, account-available catalog, chooses exact IDs, and freezes the catalog hash through execution and resume. A malformed or incomplete catalog blocks dispatch. Previews are not intentionally selected. A changed host default or lower-capability entry is considered only on a new run, never midway through a tree. Review and integration must not silently downgrade.
 
 ## Automatic routing
 
