@@ -149,7 +149,7 @@ Run:
 
 ```bash
 python3 -m unittest tests.test_providers.ProviderTests.test_claude_command_includes_selected_model_and_effort -v
-python3 -m unittest tests.test_tree.TreeRuntimeTests.test_resume_rejects_changed_model_catalog -v
+python3 -m unittest tests.test_tree.MixedTreeTests.test_resume_rejects_changed_model_catalog -v
 ```
 
 Expected: missing fields or unsupported Claude settings cause the new assertions to fail.
