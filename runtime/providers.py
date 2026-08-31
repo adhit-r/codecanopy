@@ -84,6 +84,8 @@ GIT_OPERATION_TIMEOUT_SECONDS = 30
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
 _MODEL_CATALOG_HASH = re.compile(r"^[0-9a-f]{64}$")
+_MODEL_TIERS = ("lead", "expert", "reviewer", "worker")
+_MAX_CATALOG_METADATA_CHARS = 128
 _CLAUDE_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _SAFE_ENVIRONMENT = frozenset(
     {
@@ -125,6 +127,7 @@ class ProviderRequest:
     model: str | None = None
     reasoning_effort: str | None = None
     model_catalog_hash: str | None = None
+    model_catalog_snapshot: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -266,6 +269,11 @@ def append_proof_receipt(
     baseline: str | None = None,
 ) -> None:
     """Append a JSONL receipt with hashes only; never persist prompt or output."""
+    model_catalog = (
+        validate_model_catalog_snapshot(request.model_catalog_snapshot, request.preferred_provider)
+        if request.model_catalog_snapshot is not None
+        else None
+    )
     receipt = {
         "run_id": run_id,
         "node_id": node_id,
@@ -280,6 +288,7 @@ def append_proof_receipt(
         "requested_model": request.model,
         "requested_reasoning_effort": request.reasoning_effort,
         "model_catalog_hash": request.model_catalog_hash,
+        "model_catalog": model_catalog,
         "actual_model": result.actual_model,
     }
     receipt.update(
@@ -423,9 +432,52 @@ def _validate_request(request: ProviderRequest) -> None:
         not isinstance(request.model_catalog_hash, str) or not _MODEL_CATALOG_HASH.fullmatch(request.model_catalog_hash)
     ):
         raise ValueError("model_catalog_hash must be a lowercase SHA-256 digest")
+    if request.model_catalog_snapshot is not None:
+        snapshot = validate_model_catalog_snapshot(request.model_catalog_snapshot, request.preferred_provider)
+        if request.model_catalog_hash != snapshot["catalog_hash"]:
+            raise ValueError("model_catalog_hash must match the model catalog snapshot")
     cwd = Path(request.cwd or Path.cwd())
     if not cwd.is_dir():
         raise ValueError(f"provider working directory does not exist: {cwd}")
+
+
+def validate_model_catalog_snapshot(value: object, provider: ProviderName) -> dict[str, object]:
+    """Normalize the bounded provider snapshot that can be persisted in evidence."""
+    required = {"provider", "source", "source_version", "roles", "catalog_hash"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise ValueError("model catalog snapshot is invalid")
+    snapshot_provider = value.get("provider")
+    source = value.get("source")
+    source_version = value.get("source_version")
+    roles = value.get("roles")
+    catalog_hash = value.get("catalog_hash")
+    if snapshot_provider != provider or not isinstance(source, str) or not source or len(source) > _MAX_CATALOG_METADATA_CHARS:
+        raise ValueError("model catalog snapshot is invalid")
+    if source_version is not None and (not isinstance(source_version, str) or len(source_version) > _MAX_CATALOG_METADATA_CHARS):
+        raise ValueError("model catalog snapshot is invalid")
+    if not isinstance(roles, Mapping) or set(roles) != set(_MODEL_TIERS):
+        raise ValueError("model catalog snapshot is invalid")
+    normalized_roles: dict[str, dict[str, str]] = {}
+    for tier in _MODEL_TIERS:
+        setting = roles[tier]
+        if not isinstance(setting, Mapping) or set(setting) != {"model", "reasoning_effort"}:
+            raise ValueError("model catalog snapshot is invalid")
+        model = setting.get("model")
+        effort = setting.get("reasoning_effort")
+        validate_provider_settings(provider, model, effort)
+        if not isinstance(model, str) or not isinstance(effort, str):
+            raise ValueError("model catalog snapshot is invalid")
+        normalized_roles[tier] = {"model": model, "reasoning_effort": effort}
+    payload = {
+        "provider": provider,
+        "source": source,
+        "source_version": source_version,
+        "roles": normalized_roles,
+    }
+    expected_hash = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if not isinstance(catalog_hash, str) or catalog_hash != expected_hash:
+        raise ValueError("model catalog snapshot hash is invalid")
+    return {**payload, "catalog_hash": catalog_hash}
 
 
 def _provider_environment(provider: ProviderName, *, include_credentials: bool = True) -> dict[str, str]:

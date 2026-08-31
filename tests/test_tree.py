@@ -5,14 +5,162 @@ import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from hashlib import sha256
 from pathlib import Path
+from unittest.mock import patch
 
 from runtime.manifest import ManifestError, ManifestStore
+from runtime.model_catalog import ResolvedCatalog, RoleModel
 from runtime.providers import ProviderResult
 from runtime.tree import MAX_NODES, MAX_PLAN_BYTES, TreeNode, _load_plan, main, run_tree
 
 
+def catalog(provider, source, source_version, models):
+    roles = {role: RoleModel(model, effort) for role, (model, effort) in models.items()}
+    payload = {
+        "provider": provider,
+        "source": source,
+        "source_version": source_version,
+        "roles": {
+            role: {"model": roles[role].model, "reasoning_effort": roles[role].reasoning_effort}
+            for role in ("lead", "expert", "reviewer", "worker")
+        },
+    }
+    digest = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return ResolvedCatalog(provider, source, source_version, roles, digest)
+
+
+CODEX_CATALOG = catalog(
+    "codex",
+    "codex_app_server",
+    "0.1",
+    {
+        "lead": ("codex-lead", "high"),
+        "expert": ("codex-expert", "high"),
+        "reviewer": ("codex-expert", "high"),
+        "worker": ("codex-worker", "medium"),
+    },
+)
+CLAUDE_CATALOG = catalog(
+    "claude",
+    "claude_aliases",
+    None,
+    {
+        "lead": ("best", "high"),
+        "expert": ("sonnet", "high"),
+        "reviewer": ("sonnet", "high"),
+        "worker": ("haiku", "medium"),
+    },
+)
+
+
 class MixedTreeTests(unittest.TestCase):
+    def test_provider_catalog_snapshots_bind_mixed_receipts_without_raw_catalogs(self):
+        requests = []
+
+        def execute(request):
+            requests.append(request)
+            return ProviderResult("completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_tree(
+                [
+                    TreeNode("codex", "define", "codex", model_tier="lead"),
+                    TreeNode("claude", "review", "claude", model_tier="worker"),
+                ],
+                manifest_path=root / "run.jsonl",
+                run_id="catalogs",
+                provider_catalogs={"codex": CODEX_CATALOG, "claude": CLAUDE_CATALOG},
+                require_provider_catalogs=True,
+                execute=execute,
+            )
+            snapshot = ManifestStore(root / "run.jsonl").snapshot("catalogs")
+            codex_receipt = json.loads((root / "receipts" / "codex.jsonl").read_text(encoding="utf-8"))
+            claude_receipt = json.loads((root / "receipts" / "claude.jsonl").read_text(encoding="utf-8"))
+            persisted = (root / "run.jsonl").read_text(encoding="utf-8")
+
+        catalogs = snapshot["details"]["provider_catalogs"]
+        self.assertEqual({"codex", "claude"}, set(catalogs))
+        self.assertNotEqual(catalogs["codex"]["catalog_hash"], catalogs["claude"]["catalog_hash"])
+        self.assertEqual(["codex-lead", "haiku"], [request.model for request in requests])
+        self.assertEqual(catalogs["codex"], codex_receipt["model_catalog"])
+        self.assertEqual(catalogs["claude"], claude_receipt["model_catalog"])
+        self.assertEqual(catalogs["codex"]["catalog_hash"], codex_receipt["model_catalog_hash"])
+        self.assertEqual(catalogs["claude"]["catalog_hash"], claude_receipt["model_catalog_hash"])
+        self.assertNotIn("raw-model-list", persisted)
+        self.assertEqual({"provider", "source", "source_version", "roles", "catalog_hash"}, set(catalogs["codex"]))
+
+    def test_catalog_snapshot_resume_rejects_missing_or_tampered_data_without_redispatch(self):
+        for mutation in ("missing", "tampered"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                manifest = Path(directory) / "run.jsonl"
+                run_tree(
+                    [TreeNode("codex", "define", "codex", model_tier="lead")],
+                    manifest_path=manifest,
+                    run_id="catalog-resume",
+                    provider_catalogs={"codex": CODEX_CATALOG},
+                    require_provider_catalogs=True,
+                    execute=lambda request: ProviderResult(
+                        "completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {}
+                    ),
+                )
+                text = manifest.read_text(encoding="utf-8")
+                if mutation == "missing":
+                    text = text.replace('"provider_catalogs":{"codex":', '"provider_catalogs":{"broken":')
+                else:
+                    text = text.replace(CODEX_CATALOG.catalog_hash, "b" * 64)
+                manifest.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ManifestError, "catalog snapshot"):
+                    run_tree(
+                        [TreeNode("codex", "define", "codex", model_tier="lead")],
+                        manifest_path=manifest,
+                        run_id="catalog-resume",
+                        require_provider_catalogs=True,
+                        execute=lambda _request: self.fail("resume must not redispatch"),
+                    )
+
+    def test_cli_resolves_each_provider_once_for_a_new_run_and_never_on_resume(self):
+        calls = []
+
+        def resolve(provider, _settings):
+            calls.append(provider)
+            return {"codex": CODEX_CATALOG, "claude": CLAUDE_CATALOG}[provider]
+
+        def execute(request):
+            return ProviderResult(
+                "completed", request.preferred_provider, request.preferred_provider, False, 0, "ok", None, {}
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = root / "plan.json"
+            manifest = root / "run.jsonl"
+            plan.write_text(
+                json.dumps(
+                    {
+                        "run_id": "cli-catalogs",
+                        "nodes": [
+                            {"id": "codex", "prompt": "define", "provider": "codex", "model_tier": "lead"},
+                            {"id": "claude", "prompt": "review", "provider": "claude", "model_tier": "worker"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch("runtime.tree.resolve_model_catalog", side_effect=resolve),
+                patch("runtime.tree.execute_provider", side_effect=execute),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(0, main([str(plan), "--manifest", str(manifest)]))
+                self.assertEqual(["claude", "codex"], calls)
+                self.assertEqual(0, main([str(plan), "--manifest", str(manifest)]))
+
+        self.assertEqual(["claude", "codex"], calls)
+
     def test_codex_and_claude_nodes_run_in_dependency_order_and_are_recorded(self):
         calls = []
 

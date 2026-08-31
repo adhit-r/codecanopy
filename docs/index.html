@@ -216,7 +216,7 @@ on_failure = "fail"
 [models.lead]
 model = "auto"
 reasoning_effort = "high"</code></pre>
-          <p><strong>Model catalog:</strong> CodeCanopy scores a node, chooses its role tier, resolves the provider-released and account-available catalog once, freezes its hash, dispatches an exact Codex ID or Claude alias, then records observed model evidence.</p>
+          <p><strong>Model catalog:</strong> CodeCanopy scores a node, chooses its role tier, then resolves each selected provider's provider-released and account-available catalog once. It freezes a bounded per-provider snapshot of resolved IDs or aliases, source metadata, and canonical hash; each node receipt binds its matching snapshot and hash.</p>
           <p>Codex exact IDs come from authenticated structured host metadata. Claude aliases are dispatched directly; an exact backing ID is recorded only when <code>modelUsage</code> evidences it. A malformed or incomplete catalog blocks dispatch, and previews are not intentionally selected.</p>
           <p>A future host default or lower-capability catalog entry can be selected on the next new run, never midway through a tree or a resume. This policy does not claim universal provider availability or model quality.</p>
         </article>
