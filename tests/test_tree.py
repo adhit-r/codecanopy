@@ -75,6 +75,26 @@ class MixedTreeTests(unittest.TestCase):
                 )
             self.assertFalse(manifest.exists())
 
+    def test_incomplete_resolved_catalog_fails_closed_before_manifest_creation(self):
+        incomplete = ResolvedCatalog(
+            "codex",
+            CODEX_CATALOG.source,
+            CODEX_CATALOG.source_version,
+            {role: value for role, value in CODEX_CATALOG.roles.items() if role != "worker"},
+            CODEX_CATALOG.catalog_hash,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "run.jsonl"
+            with self.assertRaisesRegex(ValueError, "provider catalog snapshots are invalid"):
+                run_tree(
+                    [TreeNode("node", "work", model_tier="lead")],
+                    manifest_path=manifest,
+                    run_id="incomplete-catalog",
+                    provider_catalogs={"codex": incomplete},
+                    require_provider_catalogs=True,
+                )
+            self.assertFalse(manifest.exists())
+
     def test_catalog_backed_cli_rejects_provider_fallback_before_discovery(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

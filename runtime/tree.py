@@ -13,7 +13,7 @@ import subprocess
 from typing import Callable, Iterable, Mapping, Sequence
 
 from .manifest import ManifestError, ManifestStore, UnknownRunError
-from .model_catalog import ResolvedCatalog, load_role_settings, resolve_model_catalog
+from .model_catalog import ResolvedCatalog, RoleModel, load_role_settings, resolve_model_catalog
 from .safeio import read_regular_limited
 from .providers import (
     ProviderName,
@@ -313,6 +313,10 @@ def _serialize_provider_catalogs(
     for provider in sorted(provider_names):
         catalog = catalogs[provider]
         if not isinstance(catalog, ResolvedCatalog) or catalog.provider != provider:
+            raise ValueError("provider catalog snapshots are invalid")
+        if not isinstance(catalog.roles, Mapping) or set(catalog.roles) != set(_MODEL_TIERS):
+            raise ValueError("provider catalog snapshots are invalid")
+        if any(not isinstance(catalog.roles[tier], RoleModel) for tier in _MODEL_TIERS):
             raise ValueError("provider catalog snapshots are invalid")
         roles = {
             tier: {"model": catalog.roles[tier].model, "reasoning_effort": catalog.roles[tier].reasoning_effort}
