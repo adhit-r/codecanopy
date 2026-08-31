@@ -190,6 +190,8 @@ def execute_provider(
     fallback_used = False
     fallback_reason: str | None = None
     if not executable and selected != "codex" and request.allow_fallback:
+        if request.model is not None or request.reasoning_effort is not None:
+            raise ValueError("provider fallback cannot retain provider-specific model or reasoning effort settings")
         selected, executable = "codex", _find_executable("codex", which)
         fallback_used = executable is not None
         fallback_reason = "preferred provider executable unavailable"
@@ -461,14 +463,21 @@ def _actual_model(provider: ProviderName | None, output: str) -> str | None:
     if provider != "claude":
         return None
     try:
-        result = json.loads(output)
-    except (TypeError, json.JSONDecodeError):
+        result = json.loads(output, object_pairs_hook=_unique_json_object)
+    except (TypeError, ValueError):
         return None
     model_usage = result.get("modelUsage") if isinstance(result, dict) else None
     if not isinstance(model_usage, Mapping) or len(model_usage) != 1:
         return None
     model = next(iter(model_usage))
     return model if isinstance(model, str) and MODEL_ID.fullmatch(model) else None
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("JSON object has duplicate members")
+    return result
 
 
 def _safe_path(value: str) -> str:

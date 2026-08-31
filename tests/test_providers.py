@@ -44,6 +44,23 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(command[0:6], ("/bin/codex", "exec", "--json", "--sandbox", "read-only", "--ephemeral"))
         self.assertEqual(command[-1], providers.SECURITY_PREAMBLE + "do work")
 
+    def test_claude_fallback_rejects_provider_specific_settings(self) -> None:
+        which = Mock(return_value=None)
+        with patch.object(providers, "_run_bounded") as runner:
+            with self.assertRaisesRegex(ValueError, "fallback"):
+                providers.execute_provider(
+                    providers.ProviderRequest(
+                        "do work",
+                        preferred_provider="claude",
+                        allow_fallback=True,
+                        model="sonnet",
+                        reasoning_effort="high",
+                    ),
+                    which=which,
+                )
+        runner.assert_not_called()
+        which.assert_called_once_with("claude")
+
     def test_codex_command_includes_trusted_model_and_effort_before_prompt(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"type":"turn.completed","usage":{}}\n', "")
         with patch.object(providers, "_run_bounded", return_value=completed) as runner:
@@ -107,6 +124,16 @@ class ProviderTests(unittest.TestCase):
                     output=output,
                 )
                 self.assertIsNone(result.actual_model)
+
+    def test_claude_actual_model_rejects_duplicate_model_usage_members(self) -> None:
+        result = providers._result(
+            status="completed",
+            provider="claude",
+            request=providers.ProviderRequest("review", preferred_provider="claude"),
+            fallback_used=False,
+            output='{"modelUsage":{"claude-sonnet-current":{}},"modelUsage":{"claude-opus-current":{}}}',
+        )
+        self.assertIsNone(result.actual_model)
 
     def test_invalid_model_catalog_hash_fails_before_execution(self) -> None:
         for catalog_hash in ("A" * 64, "a" * 63, "g" * 64):
