@@ -23,6 +23,17 @@ class ModelSettings:
 
 
 @dataclass(frozen=True)
+class ModelDiscoveryConfig:
+    mode: str
+    release_channel: str
+    refresh: str
+    on_failure: str
+
+
+AUTOMATIC_MODEL_DISCOVERY = ModelDiscoveryConfig("automatic", "ga", "run_start", "fail")
+
+
+@dataclass(frozen=True)
 class RoutingConfig:
     strategy: str
     complexity_weight: float
@@ -30,6 +41,7 @@ class RoutingConfig:
     worker_max_score: float
     expert_max_score: float
     models: dict[str, ModelSettings]
+    model_discovery: ModelDiscoveryConfig = AUTOMATIC_MODEL_DISCOVERY
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,12 @@ def load_config(path: Path) -> RoutingConfig:
         data = tomllib.load(handle)
     routing = data.get("routing", {})
     model_tables = data.get("models", {})
+    discovery = data.get("model_discovery")
+    if not isinstance(discovery, dict) or set(discovery) != set(AUTOMATIC_MODEL_DISCOVERY.__dataclass_fields__):
+        raise ValueError("model discovery must define automatic GA run-start failure policy")
+    model_discovery = ModelDiscoveryConfig(**discovery)
+    if model_discovery != AUTOMATIC_MODEL_DISCOVERY:
+        raise ValueError("model discovery must define automatic GA run-start failure policy")
     if not isinstance(model_tables, dict) or set(model_tables) != REQUIRED_TIERS:
         raise ValueError("models must define worker, expert, lead, and reviewer tiers")
     models: dict[str, ModelSettings] = {}
@@ -75,6 +93,7 @@ def load_config(path: Path) -> RoutingConfig:
         worker_max_score=float(routing.get("worker_max_score", 0.33)),
         expert_max_score=float(routing.get("expert_max_score", 0.66)),
         models=models,
+        model_discovery=model_discovery,
     )
     if config.strategy != "weighted_complexity_size":
         raise ValueError("routing strategy must be weighted_complexity_size")

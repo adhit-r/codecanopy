@@ -24,23 +24,29 @@ whitespace check.
 1. Update `plugins/code-canopy/.codex-plugin/plugin.json` and `CHANGELOG.md`.
 2. Confirm the README, product metadata, and Pages copy agree about shipped
    capability and evidence tier.
-3. Create an immutable tag such as `v0.4.0` only after the checks pass.
-4. Publish the tag and verify the GitHub Pages workflow before announcing the
+3. Merge the protected release pull request after its checks and review gates
+   pass.
+4. Create an immutable annotated tag such as `v0.5.0` at that exact merged
+   commit, then publish the tag and its GitHub Release notes.
+5. Verify the release URL and run a clean tag-pinned marketplace install smoke
+   test.
+6. Verify the GitHub Pages workflow and public page before announcing the
    release.
 
-The current marketplace source tracks `main`, so a tag-pinned installation is
-not claimed until the marketplace supports a pinned source and a clean install
-smoke test passes. Runtime packaging is a separate release gate because the
-current marketplace entry contains the plugin directory, while the local
-Python runtime remains at repository root.
+The rolling marketplace source tracks `main`. A release may also publish a
+tag-pinned clean-install command using `--ref vX.Y.Z`, but only after that exact
+tag passes a clean marketplace install smoke test. Runtime packaging is a
+separate release gate because the current marketplace entry contains the plugin
+directory, while the local Python runtime remains at repository root.
 
 ## After publishing
 
 ```bash
 codex plugin marketplace upgrade codecanopy
-codex plugin add code-canopy@codecanopy --enable
+codex plugin add code-canopy@codecanopy
 codex plugin list
 ```
 
 Restart Codex or start a new task, then verify the installed plugin version and
-the public Pages URL. Marketplace refresh alone does not install a new plugin.
+the public Pages URL. Marketplace refresh alone does not reinstall a plugin,
+and repository maintainers cannot remotely force an installed copy to update.

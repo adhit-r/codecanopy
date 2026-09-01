@@ -6,8 +6,17 @@ CodeCanopy is an engineering orchestration plugin with local runtime support for
 
 ## Install
 
+Rolling installation from the latest reviewed `main` branch:
+
 ```bash
 codex plugin marketplace add adhit-r/codecanopy --ref main
+codex plugin add code-canopy@codecanopy
+```
+
+Pin a clean installation to v0.5.0 instead:
+
+```bash
+codex plugin marketplace add adhit-r/codecanopy --ref v0.5.0
 codex plugin add code-canopy@codecanopy
 ```
 
@@ -15,6 +24,17 @@ Restart the Codex or ChatGPT desktop app after installation, then start a new ta
 The marketplace package installs the skill. The optional Python runtime commands
 below currently require a repository checkout; packaging that runtime is the
 next release gate.
+
+## Upgrade an existing installation
+
+```bash
+codex plugin marketplace upgrade codecanopy
+codex plugin add code-canopy@codecanopy
+```
+
+Start a new task after upgrading so Codex loads the new plugin version. CodeCanopy
+cannot remotely overwrite an installed plugin: each user controls when their local
+marketplace snapshot and installation are refreshed.
 
 ## Use
 
@@ -32,6 +52,10 @@ CodeCanopy keeps two structures separate:
 The root applies a Leaf Test before delegation. Atomic work stays with one agent. Non-atomic work splits only into independently verifiable outcomes, runs from the deepest dependency-ready frontier, and returns upward through parent acceptance checks. Before dependent source work runs, the root materializes its accepted predecessors into an immutable baseline. Changed contracts invalidate only dependent descendants.
 
 During planning, CodeCanopy estimates each node's normalized complexity and size, computes the weighted routing score from `.codecanopy.toml`, and automatically selects the smallest configured tier allowed by policy. Simple bounded work routes to `worker`, medium work to `expert`, and complex or safety-sensitive work to `lead`; review work routes to `reviewer`, and uncertain work never routes below `expert`. The checked-in deterministic policy benchmark currently passes 10/10 routing cases, rejects 3/3 invalid estimates, and gives 6/10 fixture cases non-lead assignments. It is not evidence of model quality, token savings, latency, or throughput. Run it with `python3 benchmarks/model_routing.py`; use the [paired benchmark contract](benchmarks/README.md) before making comparative claims.
+
+### Automatic model resolution
+
+For each new run, CodeCanopy scores a node, chooses its role tier, then resolves each selected provider's provider-released and account-available catalog once. It freezes a bounded per-provider snapshot of the resolved IDs or aliases, source metadata, and canonical hash; every node receipt binds its matching snapshot and hash. It dispatches an exact Codex ID or a Claude alias, and records observed model evidence. That frozen catalog remains in effect through execution and resume: a future host default or lower-capability entry can be selected only by the next new run, never midway through a tree. A malformed or incomplete catalog blocks dispatch. Codex exact IDs come from authenticated structured host metadata; Claude aliases are dispatched directly and an exact backing ID is recorded only when `modelUsage` evidences it. Previews are not intentionally selected. These controls do not claim universal provider availability or model quality.
 
 ```text
 Goal lead
@@ -51,6 +75,12 @@ Copy the bundled [`codecanopy.toml`](plugins/code-canopy/skills/code-canopy/asse
 schema_version = 1
 runtime = "local"
 
+[model_discovery]
+mode = "automatic"
+release_channel = "ga"
+refresh = "run_start"
+on_failure = "fail"
+
 [tree]
 max_depth = 3
 max_children_per_node = 3
@@ -61,11 +91,27 @@ max_replans = 1
 [budget]
 root_reserve_percent = 35
 retry_limit = 1
+
+[models.lead]
+model = "auto"
+reasoning_effort = "high"
+
+[models.expert]
+model = "auto"
+reasoning_effort = "high"
+
+[models.worker]
+model = "auto"
+reasoning_effort = "medium"
+
+[models.reviewer]
+model = "auto"
+reasoning_effort = "high"
 ```
 
 The strongest configured tier owns requirements, material questions, integration, and replanning. Smaller configured tiers receive bounded work. Model availability and host limits still apply.
 
-Provider and timeout are per-node values, not TOML settings. Local support checks an installed CLI, prepends a fixed trust boundary, and invokes Codex or Claude without a shell. Delegated Codex runs ignore user config and rules, disable project instruction loading and workspace network, prevent login shells, strip the child-shell environment, require the configured sandbox, and persist no session. Claude runs in safe, non-persistent mode with only bounded file tools; customizations, Bash, agents, browser, slash-command, web, and MCP tools are unavailable. The root runs acceptance checks. Fallback is denied by default; unavailable Claude work reaches Codex only after explicit CLI consent. The provider subprocess receives an allowlisted environment and bounded output capture. CodeCanopy does not claim that provider policies or model quality are equivalent.
+Provider and timeout are per-node values, not TOML settings. Local support checks an installed CLI, prepends a fixed trust boundary, and invokes Codex or Claude without a shell. Delegated Codex runs ignore user config and rules, disable project instruction loading and workspace network, prevent login shells, strip the child-shell environment, require the configured sandbox, and persist no session. Claude runs in safe, non-persistent mode with only bounded file tools; customizations, Bash, agents, browser, slash-command, web, and MCP tools are unavailable. The root runs acceptance checks. Catalog-backed CLI runs never translate a frozen Claude alias to Codex; an unavailable Claude provider blocks the node. The legacy direct provider API permits fallback only when the caller authorized the exact transition before dispatch and supplied no provider-specific model setting. The provider subprocess receives an allowlisted environment and bounded output capture. CodeCanopy does not claim that provider policies or model quality are equivalent.
 
 ## Safety boundary
 
@@ -81,20 +127,20 @@ Codex app tasks, local Codex CLI nodes, and local Claude CLI nodes collaborate t
 
 ### Run a mixed-provider tree locally
 
-The runtime accepts a small JSON plan. Each node names its provider and dependencies; the runner records results, receipts, and recovery state without merging or pushing:
+The runtime accepts a small JSON plan. Each node names its provider, explicit selected `model_tier`, and dependencies; a missing or invalid tier blocks before catalog discovery. The runner records results, receipts, and recovery state without merging or pushing:
 
 ```json
 {
   "run_id": "mixed-example",
   "nodes": [
-    {"id": "contract", "provider": "codex", "prompt": "Define the contract."},
-    {"id": "backend", "provider": "codex", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the backend."},
-    {"id": "ui", "provider": "claude", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the UI."}
+    {"id": "contract", "provider": "codex", "model_tier": "lead", "prompt": "Define the contract."},
+    {"id": "backend", "provider": "codex", "model_tier": "expert", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the backend."},
+    {"id": "ui", "provider": "claude", "model_tier": "expert", "depends_on": ["contract"], "dependency_commits": {"contract": "1111111111111111111111111111111111111111"}, "prompt": "Implement the UI."}
   ]
 }
 ```
 
-Replace the example dependency SHA with the accepted predecessor commit already materialized in each dependent node's baseline; every dependency requires an exact immutable mapping. Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --repo . --worktree-root .worktrees --receipt-dir .codecanopy/receipts --accept-completed` only when a successful CLI exit is the explicit leaf check. Trusted filesystem roots are CLI arguments and are rejected inside the JSON plan. Without `--accept-completed`, results remain `returned`. Add `--allow-provider-fallback` only when unavailable Claude work may be disclosed to Codex. Completed manifests remain inspectable but cannot authorize another execution.
+Replace the example dependency SHA with the accepted predecessor commit already materialized in each dependent node's baseline; every dependency requires an exact immutable mapping. Run it with `python3 -m runtime.tree plan.json --manifest .codecanopy/run.jsonl --repo . --worktree-root .worktrees --receipt-dir .codecanopy/receipts --accept-completed` only when a successful CLI exit is the explicit leaf check. Trusted filesystem roots are CLI arguments and are rejected inside the JSON plan. Without `--accept-completed`, results remain `returned`. Catalog-backed runs do not translate a frozen Claude alias to Codex: an unavailable Claude provider blocks the node. Completed manifests remain inspectable but cannot authorize another execution.
 
 Inspect an existing local run without dispatching a provider:
 
@@ -109,7 +155,7 @@ node. These are local manifest views, not proof that a goal is accepted.
 
 ## Roadmap
 
-- Current release: v0.4.0 hardens the public skill and local runtime against instruction injection, credential leakage, provider confusion, unsafe state files, forged lifecycle replay, unbounded input/output, and worktree substitution. See [CHANGELOG.md](CHANGELOG.md).
+- Current release: v0.5.0 adds automatic, run-frozen provider catalog resolution while retaining the existing safety boundaries. See [CHANGELOG.md](CHANGELOG.md).
 - Next: package the local runtime with the marketplace artifact, add a pinned release workflow, and verify the installed plugin from a clean archive.
 - In progress: run observability now includes `--status` and `--inspect` for reconstructing the critical frontier from a manifest.
 - Tracked work: [public Pages documentation](https://github.com/adhit-r/codecanopy/issues/2), [current work](https://github.com/adhit-r/codecanopy/issues/1), and the provider/recovery issues [#4](https://github.com/adhit-r/codecanopy/issues/4), [#5](https://github.com/adhit-r/codecanopy/issues/5), and [#6](https://github.com/adhit-r/codecanopy/issues/6).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import subprocess
@@ -44,6 +45,23 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(command[0:6], ("/bin/codex", "exec", "--json", "--sandbox", "read-only", "--ephemeral"))
         self.assertEqual(command[-1], providers.SECURITY_PREAMBLE + "do work")
 
+    def test_claude_fallback_rejects_provider_specific_settings(self) -> None:
+        which = Mock(return_value=None)
+        with patch.object(providers, "_run_bounded") as runner:
+            with self.assertRaisesRegex(ValueError, "fallback"):
+                providers.execute_provider(
+                    providers.ProviderRequest(
+                        "do work",
+                        preferred_provider="claude",
+                        allow_fallback=True,
+                        model="sonnet",
+                        reasoning_effort="high",
+                    ),
+                    which=which,
+                )
+        runner.assert_not_called()
+        which.assert_called_once_with("claude")
+
     def test_codex_command_includes_trusted_model_and_effort_before_prompt(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"type":"turn.completed","usage":{}}\n', "")
         with patch.object(providers, "_run_bounded", return_value=completed) as runner:
@@ -61,18 +79,127 @@ class ProviderTests(unittest.TestCase):
         self.assertIn('model_reasoning_effort="medium"', command)
         self.assertEqual(providers.SECURITY_PREAMBLE + "review", command[-1])
 
-    def test_invalid_or_claude_model_settings_fail_before_execution(self) -> None:
+    def test_invalid_or_unsupported_model_settings_fail_before_execution(self) -> None:
         requests = (
             providers.ProviderRequest("review", model="../../escape"),
             providers.ProviderRequest("review", reasoning_effort="fast"),
-            providers.ProviderRequest("review", preferred_provider="claude", model="claude"),
-            providers.ProviderRequest("review", preferred_provider="claude", reasoning_effort="high"),
+            providers.ProviderRequest("review", preferred_provider="claude", reasoning_effort="ultra"),
         )
         for request in requests:
             with self.subTest(request=request), patch.object(providers, "_run_bounded") as runner:
                 with self.assertRaises(ValueError):
                     providers.execute_provider(request, which=lambda _: "/bin/provider")
                 runner.assert_not_called()
+
+    def test_claude_command_includes_selected_model_and_effort(self) -> None:
+        request = providers.ProviderRequest(
+            "review",
+            preferred_provider="claude",
+            model="sonnet",
+            reasoning_effort="high",
+            model_catalog_hash="a" * 64,
+        )
+        completed = subprocess.CompletedProcess([], 0, '{"modelUsage":{"claude-sonnet-current":{}}}', "")
+        with patch.object(providers, "_run_bounded", return_value=completed) as runner:
+            result = providers.execute_provider(request, which=lambda _: "/bin/claude")
+        command = runner.call_args.args[0]
+        self.assertEqual(("--model", "sonnet", "--effort", "high"), command[-5:-1])
+        self.assertEqual(providers.SECURITY_PREAMBLE + "review", command[-1])
+        self.assertEqual("claude-sonnet-current", result.actual_model)
+        with tempfile.TemporaryDirectory() as directory:
+            receipt_path = Path(directory) / "receipt.jsonl"
+            providers.append_proof_receipt(receipt_path, request, result)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual("claude-sonnet-current", receipt["actual_model"])
+        self.assertEqual("a" * 64, receipt["model_catalog_hash"])
+
+    def test_claude_actual_model_requires_one_valid_model_usage_key(self) -> None:
+        request = providers.ProviderRequest("review", preferred_provider="claude")
+        for output in ("not JSON", '{"modelUsage":{"one":{},"two":{}}}', '{"modelUsage":{"../escape":{}}}'):
+            with self.subTest(output=output):
+                result = providers._result(
+                    status="completed",
+                    provider="claude",
+                    request=request,
+                    fallback_used=False,
+                    output=output,
+                )
+                self.assertIsNone(result.actual_model)
+
+    def test_claude_actual_model_rejects_duplicate_model_usage_members(self) -> None:
+        result = providers._result(
+            status="completed",
+            provider="claude",
+            request=providers.ProviderRequest("review", preferred_provider="claude"),
+            fallback_used=False,
+            output='{"modelUsage":{"claude-sonnet-current":{}},"modelUsage":{"claude-opus-current":{}}}',
+        )
+        self.assertIsNone(result.actual_model)
+
+    def test_invalid_model_catalog_hash_fails_before_execution(self) -> None:
+        for catalog_hash in ("A" * 64, "a" * 63, "g" * 64):
+            with self.subTest(catalog_hash=catalog_hash), patch.object(providers, "_run_bounded") as runner:
+                with self.assertRaisesRegex(ValueError, "lowercase SHA-256 digest"):
+                    providers.execute_provider(
+                        providers.ProviderRequest("review", model_catalog_hash=catalog_hash),
+                        which=lambda _: "/bin/codex",
+                    )
+                runner.assert_not_called()
+
+    def test_catalog_snapshot_rejects_unbound_dispatch_settings_before_execution(self) -> None:
+        roles = {
+            "lead": {"model": "codex-lead", "reasoning_effort": "high"},
+            "expert": {"model": "codex-expert", "reasoning_effort": "high"},
+            "reviewer": {"model": "codex-expert", "reasoning_effort": "high"},
+            "worker": {"model": "codex-worker", "reasoning_effort": "medium"},
+        }
+        payload = {
+            "provider": "codex",
+            "source": "test_catalog",
+            "source_version": "1",
+            "roles": roles,
+        }
+        catalog_hash = sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        snapshot = {**payload, "catalog_hash": catalog_hash}
+        requests = (
+            providers.ProviderRequest(
+                "review",
+                model="codex-unlisted",
+                reasoning_effort="high",
+                model_catalog_hash=catalog_hash,
+                model_catalog_snapshot=snapshot,
+            ),
+            providers.ProviderRequest(
+                "review",
+                model="codex-worker",
+                reasoning_effort="high",
+                model_catalog_hash=catalog_hash,
+                model_catalog_snapshot=snapshot,
+            ),
+            providers.ProviderRequest(
+                "review",
+                model_catalog_hash=catalog_hash,
+                model_catalog_snapshot=snapshot,
+            ),
+        )
+        for request in requests:
+            with self.subTest(request=request), patch.object(providers, "_run_bounded") as runner:
+                with self.assertRaisesRegex(ValueError, "must match the model catalog snapshot"):
+                    providers.execute_provider(request, which=lambda _: "/bin/codex")
+                runner.assert_not_called()
+        exact = providers.ProviderRequest(
+            "review",
+            model="codex-lead",
+            reasoning_effort="high",
+            model_catalog_hash=catalog_hash,
+            model_catalog_snapshot=snapshot,
+        )
+        completed = subprocess.CompletedProcess([], 0, '{"type":"turn.completed","usage":{}}\n', "")
+        with patch.object(providers, "_run_bounded", return_value=completed) as runner:
+            providers.execute_provider(exact, which=lambda _: "/bin/codex")
+        runner.assert_called_once()
 
     def test_timeout_returns_a_normalized_result(self) -> None:
         with patch.object(providers, "_run_bounded", side_effect=subprocess.TimeoutExpired("codex", 2)):

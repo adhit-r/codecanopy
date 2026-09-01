@@ -83,6 +83,10 @@ MAX_RECEIPT_EVENT_BYTES = 64 * 1024
 GIT_OPERATION_TIMEOUT_SECONDS = 30
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
+_MODEL_CATALOG_HASH = re.compile(r"^[0-9a-f]{64}$")
+_MODEL_TIERS = ("lead", "expert", "reviewer", "worker")
+_MAX_CATALOG_METADATA_CHARS = 128
+_CLAUDE_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _SAFE_ENVIRONMENT = frozenset(
     {
         "PATH",
@@ -122,6 +126,8 @@ class ProviderRequest:
     write_access: bool = False
     model: str | None = None
     reasoning_effort: str | None = None
+    model_catalog_hash: str | None = None
+    model_catalog_snapshot: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +148,7 @@ class ProviderResult:
     output: str
     error: str | None
     receipt_data: Mapping[str, object]
+    actual_model: str | None = None
 
 
 def provider_capability(
@@ -186,6 +193,8 @@ def execute_provider(
     fallback_used = False
     fallback_reason: str | None = None
     if not executable and selected != "codex" and request.allow_fallback:
+        if request.model is not None or request.reasoning_effort is not None:
+            raise ValueError("provider fallback cannot retain provider-specific model or reasoning effort settings")
         selected, executable = "codex", _find_executable("codex", which)
         fallback_used = executable is not None
         fallback_reason = "preferred provider executable unavailable"
@@ -260,6 +269,11 @@ def append_proof_receipt(
     baseline: str | None = None,
 ) -> None:
     """Append a JSONL receipt with hashes only; never persist prompt or output."""
+    model_catalog = (
+        validate_model_catalog_snapshot(request.model_catalog_snapshot, request.preferred_provider)
+        if request.model_catalog_snapshot is not None
+        else None
+    )
     receipt = {
         "run_id": run_id,
         "node_id": node_id,
@@ -273,6 +287,9 @@ def append_proof_receipt(
         "timeout_seconds": request.timeout_seconds,
         "requested_model": request.model,
         "requested_reasoning_effort": request.reasoning_effort,
+        "model_catalog_hash": request.model_catalog_hash,
+        "model_catalog": model_catalog,
+        "actual_model": result.actual_model,
     }
     receipt.update(
         prompt_hash=_hash(request.prompt),
@@ -361,10 +378,22 @@ def _result(
         "timeout_seconds": request.timeout_seconds,
         "requested_model": request.model,
         "requested_reasoning_effort": request.reasoning_effort,
+        "model_catalog_hash": request.model_catalog_hash,
+        "actual_model": _actual_model(provider, output),
         "prompt_hash": _hash(request.prompt),
         "output_hash": _hash(output),
     }
-    return ProviderResult(status, provider, request.preferred_provider, fallback_used, exit_code, output, error, receipt_data)
+    return ProviderResult(
+        status,
+        provider,
+        request.preferred_provider,
+        fallback_used,
+        exit_code,
+        output,
+        error,
+        receipt_data,
+        receipt_data["actual_model"],
+    )
 
 
 def _hash(value: str) -> str:
@@ -389,8 +418,8 @@ def validate_provider_settings(
         not isinstance(reasoning_effort, str) or reasoning_effort not in REASONING_EFFORTS
     ):
         raise ValueError(f"reasoning_effort must be one of {sorted(REASONING_EFFORTS)}")
-    if provider == "claude" and (model is not None or reasoning_effort is not None):
-        raise ValueError("Claude requests cannot select model or reasoning effort")
+    if provider == "claude" and reasoning_effort is not None and reasoning_effort not in _CLAUDE_REASONING_EFFORTS:
+        raise ValueError(f"Claude reasoning_effort must be one of {sorted(_CLAUDE_REASONING_EFFORTS)}")
 
 
 def _validate_request(request: ProviderRequest) -> None:
@@ -399,9 +428,62 @@ def _validate_request(request: ProviderRequest) -> None:
     if not 0 < request.timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 0 and {MAX_TIMEOUT_SECONDS}")
     validate_provider_settings(request.preferred_provider, request.model, request.reasoning_effort)
+    if request.model_catalog_hash is not None and (
+        not isinstance(request.model_catalog_hash, str) or not _MODEL_CATALOG_HASH.fullmatch(request.model_catalog_hash)
+    ):
+        raise ValueError("model_catalog_hash must be a lowercase SHA-256 digest")
+    if request.model_catalog_snapshot is not None:
+        snapshot = validate_model_catalog_snapshot(request.model_catalog_snapshot, request.preferred_provider)
+        if request.model_catalog_hash != snapshot["catalog_hash"]:
+            raise ValueError("model_catalog_hash must match the model catalog snapshot")
+        settings = {
+            (role["model"], role["reasoning_effort"])
+            for role in snapshot["roles"].values()
+        }
+        if (request.model, request.reasoning_effort) not in settings:
+            raise ValueError("requested model and reasoning_effort must match the model catalog snapshot")
     cwd = Path(request.cwd or Path.cwd())
     if not cwd.is_dir():
         raise ValueError(f"provider working directory does not exist: {cwd}")
+
+
+def validate_model_catalog_snapshot(value: object, provider: ProviderName) -> dict[str, object]:
+    """Normalize the bounded provider snapshot that can be persisted in evidence."""
+    required = {"provider", "source", "source_version", "roles", "catalog_hash"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise ValueError("model catalog snapshot is invalid")
+    snapshot_provider = value.get("provider")
+    source = value.get("source")
+    source_version = value.get("source_version")
+    roles = value.get("roles")
+    catalog_hash = value.get("catalog_hash")
+    if snapshot_provider != provider or not isinstance(source, str) or not source or len(source) > _MAX_CATALOG_METADATA_CHARS:
+        raise ValueError("model catalog snapshot is invalid")
+    if source_version is not None and (not isinstance(source_version, str) or len(source_version) > _MAX_CATALOG_METADATA_CHARS):
+        raise ValueError("model catalog snapshot is invalid")
+    if not isinstance(roles, Mapping) or set(roles) != set(_MODEL_TIERS):
+        raise ValueError("model catalog snapshot is invalid")
+    normalized_roles: dict[str, dict[str, str]] = {}
+    for tier in _MODEL_TIERS:
+        setting = roles[tier]
+        if not isinstance(setting, Mapping) or set(setting) != {"model", "reasoning_effort"}:
+            raise ValueError("model catalog snapshot is invalid")
+        model = setting.get("model")
+        effort = setting.get("reasoning_effort")
+        validate_provider_settings(provider, model, effort)
+        if not isinstance(model, str) or not isinstance(effort, str):
+            raise ValueError("model catalog snapshot is invalid")
+        normalized_roles[tier] = {"model": model, "reasoning_effort": effort}
+    payload = {
+        "provider": provider,
+        "source": source,
+        "source_version": source_version,
+        "roles": normalized_roles,
+    }
+    expected_hash = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if not isinstance(catalog_hash, str) or catalog_hash != expected_hash:
+        raise ValueError("model catalog snapshot hash is invalid")
+    return {**payload, "catalog_hash": catalog_hash}
 
 
 def _provider_environment(provider: ProviderName, *, include_credentials: bool = True) -> dict[str, str]:
@@ -425,11 +507,35 @@ def _provider_command(
         command[command.index("read-only" if provider == "codex" else "plan")] = mode
         if provider == "claude":
             command[command.index("Read,Grep,Glob")] = "Read,Edit,Write,Grep,Glob"
-    if provider == "codex" and model is not None:
+    if model is not None:
         command.extend(("--model", model))
     if provider == "codex" and reasoning_effort is not None:
         command.extend(("--config", f'model_reasoning_effort="{reasoning_effort}"'))
+    if provider == "claude" and reasoning_effort is not None:
+        command.extend(("--effort", reasoning_effort))
     return tuple(command)
+
+
+def _actual_model(provider: ProviderName | None, output: str) -> str | None:
+    """Read Claude's sole reported model key without trusting response prose."""
+    if provider != "claude":
+        return None
+    try:
+        result = json.loads(output, object_pairs_hook=_unique_json_object)
+    except (TypeError, ValueError):
+        return None
+    model_usage = result.get("modelUsage") if isinstance(result, dict) else None
+    if not isinstance(model_usage, Mapping) or len(model_usage) != 1:
+        return None
+    model = next(iter(model_usage))
+    return model if isinstance(model, str) and MODEL_ID.fullmatch(model) else None
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("JSON object has duplicate members")
+    return result
 
 
 def _safe_path(value: str) -> str:
@@ -516,12 +622,16 @@ def _run_bounded(
     cwd: str | None,
     env: Mapping[str, str],
     timeout: float,
+    input_data: bytes | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Capture provider output without allowing it to exhaust process memory."""
+    if input_data is not None and len(input_data) > 64 * 1024:
+        raise ValueError("provider input exceeds 65536 bytes")
     process = subprocess.Popen(
         command,
         cwd=cwd,
         env=env,
+        stdin=subprocess.PIPE if input_data is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
@@ -530,6 +640,16 @@ def _run_bounded(
     output = bytearray()
     error = bytearray()
     try:
+        if input_data is not None:
+            if process.stdin is None:  # pragma: no cover - Popen contract.
+                raise OSError("provider stdin is unavailable")
+            try:
+                process.stdin.write(input_data)
+                process.stdin.flush()
+            except BrokenPipeError:
+                pass
+            finally:
+                process.stdin.close()
         for stream, target in ((process.stdout, output), (process.stderr, error)):
             if stream is not None:
                 os.set_blocking(stream.fileno(), False)
@@ -572,7 +692,7 @@ def _run_bounded(
         )
     finally:
         streams.close()
-        for stream in (process.stdout, process.stderr):
+        for stream in (process.stdin, process.stdout, process.stderr):
             if stream is not None and not stream.closed:
                 stream.close()
 

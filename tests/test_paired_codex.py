@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from benchmarks import paired_codex
 from benchmarks.model_routing import ModelSettings, RoutingConfig
+from runtime.model_catalog import ResolvedCatalog, RoleModel
 from runtime import tree as runtime_tree
 from runtime.providers import ProviderCapability, ProviderResult
 
@@ -49,6 +50,22 @@ def fake_run_contract():
         sandbox="read-only",
         acceptance_contract_hash="c" * 64,
     )
+
+
+def frozen_codex_catalog() -> ResolvedCatalog:
+    roles = {
+        "lead": RoleModel("frontier-next", "high"),
+        "expert": RoleModel("balanced-next", "high"),
+        "reviewer": RoleModel("balanced-next", "high"),
+        "worker": RoleModel("economy-next", "medium"),
+    }
+    payload = {
+        "provider": "codex",
+        "source": "codex_app_server",
+        "source_version": "0.1",
+        "roles": {tier: {"model": value.model, "reasoning_effort": value.reasoning_effort} for tier, value in roles.items()},
+    }
+    return ResolvedCatalog("codex", "codex_app_server", "0.1", roles, sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
 
 
 def fake_case_snapshots():
@@ -318,6 +335,29 @@ def write_complete_records_and_receipts_for_test(seed=41):
 
 
 class PairedCodexTests(unittest.TestCase):
+    def test_bundled_automatic_schedule_resolves_once_to_exact_catalog_models(self):
+        schedule, cases, config = paired_codex._build_command_schedule(41)
+        catalog = frozen_codex_catalog()
+        calls = []
+        executable, resolved_config = paired_codex._resolve_command_schedule(
+            schedule, cases, config, resolver=lambda *args: (calls.append(args), catalog)[1]
+        )
+
+        self.assertEqual(1, len(calls))
+        self.assertTrue(all(
+            invocation.requested_model != "auto"
+            for plan in executable.execution_plans
+            for invocation in plan.invocations
+        ))
+        self.assertEqual(catalog.catalog_hash, executable.run_contract.model_catalog_snapshot["catalog_hash"])
+        self.assertEqual("frontier-next", resolved_config.models["lead"].model)
+        fields = paired_codex._catalog_request_fields(executable.run_contract)
+        self.assertEqual(catalog.catalog_hash, fields["model_catalog_hash"])
+        self.assertEqual(executable.run_contract.model_catalog_snapshot, fields["model_catalog_snapshot"])
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "unresolved automatic"):
+                paired_codex._persist_schedule(Path(directory) / "unresolved.jsonl", schedule)
+
     def test_schedule_freezes_oracle_counts_before_dispatch(self):
         schedule, _, _ = paired_codex._build_command_schedule(41)
         self.assertEqual(
@@ -826,6 +866,7 @@ class PairedCodexTests(unittest.TestCase):
             ("matching", schedule, ()),
             ("mismatch", fake_schedule(42), ()),
             ("started", schedule, (complete_arm_record(schedule),)),
+            ("nonprefix", schedule, (complete_canopy_record(schedule),)),
         )
         for name, persisted_schedule, records in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
@@ -838,12 +879,13 @@ class PairedCodexTests(unittest.TestCase):
                         ledger, {"kind": "arm-result", **asdict(record)}
                     )
                 original = ledger.read_bytes()
-                if name == "matching":
-                    self.assertEqual((), paired_codex._persist_schedule(ledger, schedule))
+                if name in {"matching", "started"}:
+                    self.assertEqual(records, paired_codex._persist_schedule(ledger, schedule))
+                elif name == "nonprefix":
+                    with self.assertRaisesRegex(ValueError, "unique schedule prefix"):
+                        paired_codex._persist_schedule(ledger, schedule)
                 else:
-                    with self.assertRaisesRegex(
-                        ValueError, "different or started run"
-                    ):
+                    with self.assertRaisesRegex(ValueError, "different run"):
                         paired_codex._persist_schedule(ledger, schedule)
                 self.assertEqual(original, ledger.read_bytes())
 
@@ -948,6 +990,43 @@ class PairedCodexTests(unittest.TestCase):
                 loaded_records,
             )
 
+    def test_acceptance_initializes_existing_empty_private_ledger_without_path_probes(self):
+        schedule, records, _receipt_root, cleanup = write_complete_records_and_receipts_for_test()
+        self.addCleanup(cleanup.cleanup)
+        by_entry = {record.entry: record for record in records}
+        calls = []
+
+        def fake_runner(_case, entry, _config, _contract, _snapshot, _plan, **_kwargs):
+            calls.append(entry)
+            return by_entry[entry]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "empty-results.jsonl"
+            results.touch(mode=0o600)
+            state_root = root / "state"
+
+            with (
+                patch.object(Path, "exists", side_effect=AssertionError("unsafe path probe")),
+                patch.object(Path, "stat", side_effect=AssertionError("unsafe path probe")),
+                patch.object(
+                    paired_codex,
+                    "_build_command_schedule",
+                    return_value=(schedule, fake_case_definitions(), fake_routing_config()),
+                ),
+                patch.object(paired_codex, "run_sequential_arm", side_effect=fake_runner),
+                patch.object(paired_codex, "run_canopy_arm", side_effect=fake_runner),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(0, paired_codex._acceptance_command(results, state_root, 41))
+
+            self.assertEqual(list(schedule.entries[:2]), calls)
+            self.assertEqual(
+                (schedule, tuple(by_entry[entry] for entry in schedule.entries[:2])),
+                paired_codex.load_results(results),
+            )
+            self.assertEqual(0o600, results.stat().st_mode & 0o777)
+
     def test_acceptance_resumes_schedule_only_ledger_with_absent_state_root(self):
         schedule, records, _receipt_root, cleanup = write_complete_records_and_receipts_for_test()
         self.addCleanup(cleanup.cleanup)
@@ -1003,6 +1082,102 @@ class PairedCodexTests(unittest.TestCase):
                 loaded_records,
             )
             execute.assert_not_called()
+
+    def test_catalog_backed_acceptance_resumes_terminal_prefix_without_rediscovery(self):
+        unresolved, cases, config = paired_codex._build_command_schedule(41)
+        schedule, _ = paired_codex._resolve_command_schedule(
+            unresolved, cases, config, resolver=lambda *_args: frozen_codex_catalog()
+        )
+        complete = complete_arm_record(schedule)
+        interrupted = replace(
+            complete,
+            invocations=(),
+            score=None,
+            executed_nodes=0,
+            failed_nodes=0,
+            pruned_nodes=complete.planned_nodes,
+            completion_state="interrupted",
+            incomplete_reasons=("interrupted",),
+        )
+        second = complete_canopy_record(schedule)
+        for first in (complete, interrupted):
+            with self.subTest(completion_state=first.completion_state), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state_root = root / "state"
+                state_root.mkdir(mode=0o700)
+                evidence = state_root / "manifests" / "000-small-sequential.jsonl"
+                evidence.parent.mkdir()
+                evidence.write_text("frozen evidence", encoding="utf-8")
+                results = root / "results.jsonl"
+                paired_codex.append_result_record(results, {"kind": "schedule", **asdict(schedule)})
+                paired_codex.append_result_record(results, {"kind": "arm-result", **asdict(first)})
+                calls = []
+
+                def runner(_case, entry, _config, contract, _snapshot, _plan, **_kwargs):
+                    calls.append((entry, contract.model_catalog_snapshot))
+                    return second
+
+                with (
+                    patch.object(paired_codex, "_build_command_schedule", return_value=(unresolved, cases, config)),
+                    patch.object(paired_codex, "resolve_model_catalog", side_effect=AssertionError("must not rediscover")),
+                    patch.object(paired_codex, "run_sequential_arm", side_effect=runner),
+                    patch.object(paired_codex, "run_canopy_arm", side_effect=runner),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(0, paired_codex._acceptance_command(results, state_root, 41))
+
+                loaded_schedule, loaded_records = paired_codex.load_results(results)
+                self.assertEqual(schedule, loaded_schedule)
+                self.assertEqual((first, second), loaded_records)
+                self.assertEqual([(schedule.entries[1], schedule.run_contract.model_catalog_snapshot)], calls)
+                self.assertEqual("frozen evidence", evidence.read_text(encoding="utf-8"))
+
+    def test_catalog_backed_acceptance_rejects_different_resume_seed_before_mutation(self):
+        unresolved, cases, config = paired_codex._build_command_schedule(41)
+        schedule, _ = paired_codex._resolve_command_schedule(
+            unresolved, cases, config, resolver=lambda *_args: frozen_codex_catalog()
+        )
+        first = complete_arm_record(schedule)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            evidence = state_root / "manifests" / "000-small-sequential.jsonl"
+            evidence.parent.mkdir()
+            evidence.write_text("frozen evidence", encoding="utf-8")
+            results = root / "results.jsonl"
+            paired_codex.append_result_record(
+                results, {"kind": "schedule", **asdict(schedule)}
+            )
+            paired_codex.append_result_record(
+                results, {"kind": "arm-result", **asdict(first)}
+            )
+            original_ledger = results.read_bytes()
+
+            with (
+                patch.object(
+                    paired_codex,
+                    "resolve_model_catalog",
+                    side_effect=AssertionError("must not rediscover"),
+                ),
+                patch.object(
+                    paired_codex,
+                    "run_sequential_arm",
+                    side_effect=AssertionError("must not execute provider"),
+                ),
+                patch.object(
+                    paired_codex,
+                    "run_canopy_arm",
+                    side_effect=AssertionError("must not execute provider"),
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                with self.assertRaisesRegex(ValueError, "seed.*frozen schedule"):
+                    paired_codex._acceptance_command(results, state_root, 42)
+
+            self.assertEqual(original_ledger, results.read_bytes())
+            self.assertEqual("frozen evidence", evidence.read_text(encoding="utf-8"))
+            self.assertEqual((schedule, (first,)), paired_codex.load_results(results))
 
     def test_acceptance_does_not_double_append_runner_interrupt_evidence(self):
         schedule, records, state_root, cleanup = write_complete_records_and_receipts_for_test()
@@ -2021,6 +2196,9 @@ class PairedCodexTests(unittest.TestCase):
         ))
 
         schedule, cases, config = paired_codex._build_command_schedule(41)
+        schedule, config = paired_codex._resolve_command_schedule(
+            schedule, cases, config, resolver=lambda *_args: frozen_codex_catalog()
+        )
         entry = schedule.entries[0]
         snapshot = next(item for item in schedule.cases if item.case_id == entry.case_id)
         plan = next(

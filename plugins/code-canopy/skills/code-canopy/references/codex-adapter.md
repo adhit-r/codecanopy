@@ -4,20 +4,20 @@ This adapter maps the provider-neutral runtime contract to current Codex prefere
 
 ## Role preferences
 
-| Role | Preferred Codex model | Reasoning |
+| Role | Codex selector | Reasoning |
 | --- | --- | --- |
-| Lead | `gpt-5.6-sol` | high |
-| Expert | `gpt-5.6-terra` | high |
-| Worker | `gpt-5.6-luna` | medium |
-| Reviewer | `gpt-5.6-terra` | high |
+| Lead | `auto` | high |
+| Expert | `auto` | high |
+| Worker | `auto` | medium |
+| Reviewer | `auto` | high |
 
-Use the smallest capable tier for bounded execution. If a preferred model is unavailable, use only a safe available tier or return the work to the lead. Review and integration must not silently downgrade.
+Use the smallest capable tier for bounded execution. At new-run start and before manifest creation, CodeCanopy asks authenticated structured host metadata for the provider-released, account-available catalog exactly once, chooses exact IDs, and freezes their source metadata and catalog hash through execution and resume. A malformed or incomplete catalog blocks dispatch. Previews are not intentionally selected. A changed host default or lower-capability entry is considered only on a new run, never midway through a tree. Review and integration must not silently downgrade.
 
 ## Automatic routing
 
 The planner assigns every node normalized complexity and size scores, then applies `[routing]` from `codecanopy.toml` without a human model choice. The weighted score selects `worker` for simple bounded work, `expert` for medium work, and `lead` for complex work. Root, integration, and security-sensitive decisions override the score to `lead`; review work selects `reviewer`; uncertain signals select at least `expert`.
 
-The routing score is a planning decision, not a host capability claim. Codex still decides whether a configured model is available. A missing model returns the node to the lead or uses a documented safe tier; it does not silently downgrade.
+The routing score is a planning decision, not a host capability claim. Codex still decides whether a configured model is available. If a frozen exact model is unavailable, block the node. A different exact model requires explicit user authorization for that transition and a new frozen execution contract.
 
 ## Host boundary
 

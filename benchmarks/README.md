@@ -16,6 +16,8 @@ The checked-in fixture verifies 10 expected routing decisions and rejects 3 inva
 
 Any claim that CodeCanopy is faster, uses fewer tokens, or improves accepted-task quality requires paired execution runs:
 
+Before an executable Codex schedule is persisted, the benchmark resolves the bundled automatic role selectors once and freezes the exact IDs, source metadata, and catalog hash into the schedule and proof receipts. A provider-free schedule with `auto` selectors is unresolved and cannot be persisted or executed.
+
 | Arm | Contract |
 |---|---|
 | Baseline | One lead model executes the requirement sequentially. |
