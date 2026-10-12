@@ -58,6 +58,7 @@ class TreeNode:
     timeout_seconds: float = 300
     worktree_name: str | None = None
     model_tier: str | None = None
+    lean: bool = False
 
     def __post_init__(self) -> None:
         if not self.node_id or len(self.node_id) > 64 or not _NODE_ID.fullmatch(self.node_id):
@@ -100,6 +101,9 @@ class TreeNode:
             raise ValueError("worktree_name must be a string")
         if not isinstance(model_tier, str):
             raise ValueError("model_tier must be a string")
+        lean = value.get("lean", False)
+        if not isinstance(lean, bool):
+            raise ValueError("lean must be a boolean")
         dependencies_value = value.get("depends_on", ())
         if not isinstance(dependencies_value, (list, tuple)) or not all(isinstance(item, str) for item in dependencies_value):
             raise ValueError("depends_on must be an array of strings")
@@ -117,6 +121,7 @@ class TreeNode:
             timeout_seconds=float(timeout),
             worktree_name=worktree_name,
             model_tier=model_tier,
+            lean=lean,
         )
 
 
@@ -257,6 +262,7 @@ def run_tree(
             cwd=cwd,
             allow_fallback=allow_provider_fallback,
             write_access=worktree_root is not None,
+            lean=node.lean,
             model=settings_by_node[node.node_id][0],
             reasoning_effort=settings_by_node[node.node_id][1],
             model_catalog_hash=catalogs[node.provider]["catalog_hash"] if catalogs is not None else model_catalog_hash,
