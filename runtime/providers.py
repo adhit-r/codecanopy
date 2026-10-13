@@ -20,6 +20,7 @@ import subprocess
 import time
 from typing import Callable, Literal, Mapping
 
+from .efficiency import LEAN_SYSTEM_PROMPT
 from .safeio import open_private
 
 try:  # ``fcntl`` is stdlib on the Unix hosts CodeCanopy currently supports.
@@ -128,6 +129,8 @@ class ProviderRequest:
     reasoning_effort: str | None = None
     model_catalog_hash: str | None = None
     model_catalog_snapshot: Mapping[str, object] | None = None
+    # Single-turn, tool-free leaf whose scoped content is inlined in the prompt.
+    lean: bool = False
 
 
 @dataclass(frozen=True)
@@ -216,6 +219,7 @@ def execute_provider(
         request.write_access,
         model=request.model,
         reasoning_effort=request.reasoning_effort,
+        lean=request.lean,
     )
     dispatched_prompt = SECURITY_PREAMBLE + request.prompt
     command = (executable, *command[1:], dispatched_prompt)
@@ -427,6 +431,8 @@ def _validate_request(request: ProviderRequest) -> None:
         raise ValueError(f"prompt must contain 1-{MAX_PROMPT_CHARS} characters")
     if not 0 < request.timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 0 and {MAX_TIMEOUT_SECONDS}")
+    if request.lean and request.write_access:
+        raise ValueError("lean requests are read-only")
     validate_provider_settings(request.preferred_provider, request.model, request.reasoning_effort)
     if request.model_catalog_hash is not None and (
         not isinstance(request.model_catalog_hash, str) or not _MODEL_CATALOG_HASH.fullmatch(request.model_catalog_hash)
@@ -500,8 +506,15 @@ def _provider_command(
     *,
     model: str | None,
     reasoning_effort: str | None,
+    lean: bool = False,
 ) -> tuple[str, ...]:
     command = list(DEFAULT_COMMANDS[provider])
+    if lean and provider == "claude":
+        # Replace the default agent system prompt and tool definitions, which
+        # dominate the token cost of small leaves.
+        command[command.index("Read,Grep,Glob")] = ""
+        command[command.index("--max-turns") + 1] = "1"
+        command.extend(("--system-prompt", LEAN_SYSTEM_PROMPT))
     if write_access:
         mode = "workspace-write" if provider == "codex" else "acceptEdits"
         command[command.index("read-only" if provider == "codex" else "plan")] = mode

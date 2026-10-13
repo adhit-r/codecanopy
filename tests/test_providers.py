@@ -312,6 +312,30 @@ class ProviderTests(unittest.TestCase):
                 self.assertNotIn("Bash", tools)
                 self.assertEqual("8", command[command.index("--max-turns") + 1])
 
+    def test_claude_lean_request_is_single_turn_tool_free_with_minimal_system_prompt(self) -> None:
+        with patch.object(
+            providers, "_run_bounded", return_value=subprocess.CompletedProcess([], 0, "done", "")
+        ) as runner:
+            providers.execute_provider(
+                providers.ProviderRequest("review", preferred_provider="claude", lean=True),
+                which=lambda _: "/bin/claude",
+            )
+        command = runner.call_args.args[0]
+        self.assertEqual("", command[command.index("--tools") + 1])
+        self.assertEqual("1", command[command.index("--max-turns") + 1])
+        self.assertEqual(providers.LEAN_SYSTEM_PROMPT, command[command.index("--system-prompt") + 1])
+        self.assertIn("plan", command)
+        self.assertIn("--safe-mode", command)
+        self.assertEqual(providers.SECURITY_PREAMBLE + "review", command[-1])
+
+    def test_lean_requests_cannot_write(self) -> None:
+        with patch.object(providers, "_run_bounded") as runner, self.assertRaises(ValueError):
+            providers.execute_provider(
+                providers.ProviderRequest("x", preferred_provider="claude", lean=True, write_access=True),
+                which=lambda _: "/bin/claude",
+            )
+        runner.assert_not_called()
+
     def test_request_limits_are_enforced_before_execution(self) -> None:
         with patch.object(providers, "_run_bounded") as runner, self.assertRaises(ValueError):
             providers.execute_provider(
